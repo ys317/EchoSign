@@ -39,11 +39,14 @@ class AutoSigner:
 
     def _sign_one(self, code: str) -> None:
         print(f"[autosign] 听到签到码 {code}, 启动自动签到...")
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "--sign", code]  # 打包后自调用
+        else:
+            cmd = [str(PY), "-X", "utf8", str(ROOT / "browser_sign.py"), code]
         try:
-            proc = subprocess.run(
-                [str(PY), "-X", "utf8", str(ROOT / "browser_sign.py"), code],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=self.timeout_s, cwd=str(ROOT))
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace",
+                                  timeout=self.timeout_s, cwd=str(ROOT))
             out = (proc.stdout or "") + (proc.stderr or "")
         except Exception as e:  # noqa: BLE001
             out = f"启动失败: {e}"

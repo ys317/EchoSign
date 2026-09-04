@@ -9,13 +9,20 @@ later sign-ins are already logged in.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import sys
 import time
 
 from playwright.sync_api import sync_playwright
 
-ROOT = pathlib.Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    ROOT = pathlib.Path(sys.executable).parent  # PyInstaller: exe 所在目录
+    # 冻结环境下 playwright 会误找包内 .local-browsers, 指回系统浏览器目录
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(
+        pathlib.Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright")
+else:
+    ROOT = pathlib.Path(__file__).resolve().parent
 PROFILE = ROOT / "browser_profile"
 START = "https://skl.hdu.edu.cn/index.html"
 

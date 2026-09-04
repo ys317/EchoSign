@@ -15,3 +15,9 @@ models/
 browser_profile/
 tests/shots/
 tests/e2e_alerts.jsonl
+
+dist/
+build/
+*.spec
+sign_out.txt
+sign_err.txt

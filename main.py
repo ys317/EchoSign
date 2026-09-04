@@ -69,7 +69,7 @@ def make_watcher(cfg: dict, alerter: Alerter) -> SignInWatcher:
 
 
 def run_pipeline(chunks, asr, matchers, alerter, watcher: SignInWatcher | None = None,
-                 show_partial: bool = True) -> None:
+                 show_partial: bool = True, stop=None) -> None:
     t0 = time.time()
 
     def handle(text: str):
@@ -87,6 +87,9 @@ def run_pipeline(chunks, asr, matchers, alerter, watcher: SignInWatcher | None =
                 watcher.on_code(code, src)
 
     for chunk in chunks:
+        if stop is not None and stop.is_set():
+            print("\n[i] 收到停止信号")
+            break
         finals, partial = asr.accept(chunk)
         for text in finals:
             handle(text)
@@ -102,11 +105,10 @@ def run_pipeline(chunks, asr, matchers, alerter, watcher: SignInWatcher | None =
     print(f"\n结束, 共处理音频 {time.time() - t0:.1f}s(墙钟)")
 
 
-def cmd_run(cfg: dict) -> None:
+def cmd_run(cfg: dict, stop=None) -> None:
     chunk = float(cfg.get("chunk_seconds", 0.25))
     src = LoopbackSource(cfg.get("device") or None, chunk)
     print(f"[i] 正在监听输出设备: {src.speaker_name} (内录环回)")
-    al = cfg.get("alert", {})
     alerter = make_alerter(cfg)
     matchers = build_matchers(cfg)
     watcher = make_watcher(cfg, alerter)
@@ -114,7 +116,7 @@ def cmd_run(cfg: dict) -> None:
     asr = make_engine(cfg)
     print("[i] ASR 就绪, Ctrl+C 停止\n")
     try:
-        run_pipeline(src.chunks(), asr, matchers, alerter, watcher)
+        run_pipeline(src.chunks(), asr, matchers, alerter, watcher, stop=stop)
     except KeyboardInterrupt:
         print("\n已停止")
 

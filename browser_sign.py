@@ -16,8 +16,17 @@ from playwright.sync_api import sync_playwright
 from browser_login import ROOT, _cleanup_stale_profile, load_secrets, try_sso_login
 
 START = "https://skl.hdu.edu.cn/index.html"
-# 抓包里的定位(可自行修改)
-LAT, LNG = 29.219569, 119.47955
+
+
+def _location() -> tuple[float, float]:
+    cfgp = ROOT / "config.yaml"
+    if cfgp.exists():
+        try:
+            loc = (yaml.safe_load(cfgp.read_text(encoding="utf-8")) or {}).get("location") or {}
+            return float(loc.get("lat", 29.219569)), float(loc.get("lng", 119.47955))
+        except Exception:  # noqa: BLE001
+            pass
+    return 29.219569, 119.47955
 
 
 def ensure_logged_in(page, secrets: dict, timeout_s: int = 120) -> str:
@@ -113,9 +122,10 @@ def main() -> int:
     with sync_playwright() as pw:
         ctx = pw.chromium.launch_persistent_context(str(ROOT / "browser_profile"),
                                                     headless=False)
+        lat, lng = _location()
         ctx.grant_permissions(["geolocation"],
                               origin="https://skl.hdu.edu.cn")
-        ctx.set_geolocation({"latitude": LAT, "longitude": LNG, "accuracy": 30})
+        ctx.set_geolocation({"latitude": lat, "longitude": lng, "accuracy": 30})
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         token = ensure_logged_in(page, secrets)
         print(f"[i] 登录态 OK ({token[:6]}...)")
