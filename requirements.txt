@@ -1,0 +1,3 @@
+# 追加到 requirements.txt
+playwright
+requests

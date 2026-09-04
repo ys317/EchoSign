@@ -1,0 +1,17 @@
+# 本机密钥与状态
+secrets_local.json
+session_local.json
+config.yaml
+
+# 运行产物
+*.jsonl
+__pycache__/
+run_out.txt
+run_err.txt
+
+# 大文件/环境
+.venv/
+models/
+browser_profile/
+tests/shots/
+tests/e2e_alerts.jsonl

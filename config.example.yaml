@@ -1,0 +1,59 @@
+﻿# ====== 音频采集 ======
+device: null # 输出设备(扬声器)名称关键词, null=系统默认; 用 `python main.py devices` 查看列表
+chunk_seconds: 0.25 # 每次送给 ASR 的音频块长度
+
+# ====== ASR 引擎 ======
+asr:
+  model_dir: models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30
+  num_threads: 4
+  provider: cpu # 迁到 N 卡机器后改 cuda, 并配合 provider=cuda 的 sherpa-onnx 版本
+
+# ====== 匹配规则 ======
+# 文本会先归一化(去标点/空格/大小写), 所以规则直接写原文即可;
+# ASR 常见误写(如 "签到"->"签倒")建议作为变体加进 strong 提高召回。
+rules:
+  strong:                # 命中任一即告警(高优先级); "re:" 开头按正则匹配
+    - 签到
+    - 签倒
+    - 点名
+    - 打卡
+    - 签个到
+    - 点个到
+    - 点个名
+    - 报个到
+    - 报个名
+    - 're:(?<![0-9一二三四五六七八九十两])点到'   # 避开"三点到五点"这类时间表述
+  weak_groups:           # 每组内所有词同时出现才告警(中优先级)
+    - [扫, 码]
+    - [扣, 1]
+    - [扣, 一]
+    - [链接, 发]
+  semantic:              # embedding 语义匹配(fastembed, 本地推理)
+    enabled: true
+    model: BAAI/bge-small-zh-v1.5
+    threshold: 0.66      # 标定: 签到同类句 >=0.69, 干扰句 <=0.62
+    templates:
+      - 请大家现在开始签到
+      - 打开签到二维码扫一下
+      - 老师在点名了
+      - 我们先点个到
+
+# ====== 签到码监控 ======
+code_watch:
+  window_seconds: 60 # 触发签到告警后继续监听/输出文本的时长
+  context_seconds: 30 # 告警时回看的上下文范围
+  code_dedup: 60         # 同一个码在该时间内不重复报
+  standalone_code: true  # 未触发时, 独立的4位数字短句(如"二三三零")也直接报码
+  log_file: codes.jsonl
+
+# ====== 全自动签到 ======
+auto_sign:
+  enabled: true            # 听到签到码后自动打开浏览器完成签到(依赖 browser_profile 登录态)
+  timeout_seconds: 180
+
+# ====== 告警 ======
+alert:
+  log_file: alerts.jsonl
+  dedup_seconds: 90 # 相同文本在该时间内不重复告警
+  webhook: # 企业微信群机器人: 群设置->群机器人->添加->复制 Webhook 地址
+    url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=在这里填你的机器人key" # 形如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=在这里填你的机器人key
