@@ -31,7 +31,7 @@ python -m venv .venv
 
 # 3. 配置
 copy config.example.yaml config.yaml   # 填入企业微信机器人 key
-copy secrets_local.json ...            # 填入学号密码(用于 CAS 自动登录)
+#    编辑 secrets_local.json, 填入学号密码(用于 CAS 自动登录)
 
 # 4. 一次性登录(保留 browser_profile/ 登录态, 过期自动重登)
 .venv\Scripts\python.exe -X utf8 browser_login.py
