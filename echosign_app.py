@@ -1,4 +1,4 @@
-"""EchoSign GUI: 图形化配置 + 启停监控 + 日志窗.
+"""EchoSign GUI (CustomTkinter): 图形化配置 + 启停监控 + 日志窗.
 
   python echosign_app.py            # 图形界面
   EchoSign.exe --sign 2330          # 打包后自动签到入口(内部使用)
@@ -28,13 +28,16 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--sign":
 
     sys.exit(browser_sign.main())
 
-import tkinter as tk  # noqa: E402
-from tkinter import scrolledtext, ttk  # noqa: E402
-
+import customtkinter as ctk  # noqa: E402
 import yaml  # noqa: E402
 
 CONFIG = APP_ROOT / "config.yaml"
 SECRETS = APP_ROOT / "secrets_local.json"
+
+ACCENT = "#3b82f6"
+GREEN = "#22c55e"
+RED = "#ef4444"
+CARD = "#1e1e2e"
 
 
 def load_cfg() -> dict:
@@ -64,11 +67,13 @@ class QueueWriter:
         pass
 
 
-class App:
-    def __init__(self, root: tk.Tk):
-        self.root = root
-        root.title("EchoSign 回声签 - 直播课堂自动签到")
-        root.geometry("760x640")
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        ctk.set_appearance_mode("dark")
+        self.title("EchoSign")
+        self.geometry("820x700")
+        self.minsize(760, 620)
 
         self.cfg = load_cfg()
         self.secrets = load_secrets()
@@ -76,68 +81,112 @@ class App:
         self.worker: threading.Thread | None = None
         self.stop_event = threading.Event()
 
+        self._build_header()
         self._build_form()
         self._build_buttons()
         self._build_log()
         self._load_fields()
-        root.after(200, self._poll_log)
+        self.after(200, self._poll_log)
 
     # ---------- UI ----------
-    def _build_form(self):
-        f = ttk.Frame(self.root, padding=8)
-        f.pack(fill="x")
-        self.v_url = tk.StringVar()
-        self.v_user = tk.StringVar()
-        self.v_pwd = tk.StringVar()
-        self.v_hook = tk.StringVar()
-        self.v_lat = tk.StringVar()
-        self.v_lng = tk.StringVar()
-        self.v_auto = tk.BooleanVar(value=True)
-        self.v_sem = tk.BooleanVar(value=False)
+    def _build_header(self):
+        h = ctk.CTkFrame(self, fg_color="transparent")
+        h.pack(fill="x", padx=16, pady=(12, 4))
+        ctk.CTkLabel(h, text="EchoSign", font=("微软雅黑", 24, "bold")).pack(side="left")
+        ctk.CTkLabel(h, text="直播课堂自动签到", font=("微软雅黑", 13),
+                     text_color="#9ca3af").pack(side="left", padx=(10, 0), pady=(6, 0))
+        self.status_dot = ctk.CTkLabel(h, text="● 未运行", font=("微软雅黑", 13),
+                                       text_color="#6b7280")
+        self.status_dot.pack(side="right", padx=6)
 
-        def row(i, label, var, width=58, show=""):
-            ttk.Label(f, text=label).grid(row=i, column=0, sticky="e", padx=4, pady=3)
-            e = ttk.Entry(f, textvariable=var, width=width, show=show)
-            e.grid(row=i, column=1, sticky="w", padx=4)
-            return e
+    def _card(self, title: str) -> ctk.CTkFrame:
+        ctk.CTkLabel(self, text=title, font=("微软雅黑", 13, "bold"),
+                     text_color="#9ca3af").pack(anchor="w", padx=20, pady=(10, 2))
+        card = ctk.CTkFrame(self, fg_color=CARD, corner_radius=12)
+        card.pack(fill="x", padx=16)
+        return card
+
+    def _build_form(self):
+        f = self._card("配置")
+        f.grid_columnconfigure(1, weight=1)
+        self.v_url = ctk.StringVar()
+        self.v_user = ctk.StringVar()
+        self.v_pwd = ctk.StringVar()
+        self.v_hook = ctk.StringVar()
+        self.v_lat = ctk.StringVar()
+        self.v_lng = ctk.StringVar()
+        self.v_auto = ctk.BooleanVar(value=True)
+        self.v_sem = ctk.BooleanVar(value=False)
+
+        def row(i, label, var, show="", wide=True):
+            ctk.CTkLabel(f, text=label, font=("微软雅黑", 12), text_color="#c7c7d1",
+                         width=90, anchor="e").grid(row=i, column=0, padx=(12, 6), pady=5)
+            e = ctk.CTkEntry(f, textvariable=var, show=show, height=32,
+                             font=("微软雅黑", 12), fg_color="#16161f",
+                             border_color="#33334a")
+            e.grid(row=i, column=1, sticky="ew" if wide else "w",
+                   padx=(0, 12) if wide else (0, 0), pady=5)
 
         row(0, "直播页网址", self.v_url)
-        row(1, "学号", self.v_user)
-        row(2, "密码", self.v_pwd, show="*")
+        row(1, "学号", self.v_user, wide=False)
+        row(2, "密码", self.v_pwd, show="•", wide=False)
         row(3, "企微Webhook", self.v_hook)
-        row(4, "纬度", self.v_lat, width=20)
-        row(5, "经度", self.v_lng, width=20)
+        row(4, "纬度 / 经度", None)
+        e_lat = ctk.CTkEntry(f, textvariable=self.v_lat, width=120, height=32,
+                             fg_color="#16161f", border_color="#33334a")
+        e_lat.grid(row=4, column=1, sticky="w", padx=(0, 6), pady=5)
+        e_lng = ctk.CTkEntry(f, textvariable=self.v_lng, width=120, height=32,
+                             fg_color="#16161f", border_color="#33334a")
+        e_lng.grid(row=4, column=1, sticky="w", padx=(140, 0), pady=5)
 
-        ttk.Label(f, text="签到关键词").grid(row=6, column=0, sticky="ne", padx=4, pady=3)
-        self.txt_rules = tk.Text(f, height=4, width=60)
-        self.txt_rules.grid(row=6, column=1, sticky="w", padx=4)
-        ttk.Label(f, text="(每行一个)").grid(row=6, column=2, sticky="w")
+        ctk.CTkLabel(f, text="签到关键词", font=("微软雅黑", 12), text_color="#c7c7d1",
+                     width=90, anchor="e").grid(row=5, column=0, padx=(12, 6), pady=5)
+        self.txt_rules = ctk.CTkTextbox(f, height=76, font=("微软雅黑", 12),
+                                        fg_color="#16161f", border_color="#33334a",
+                                        border_width=1)
+        self.txt_rules.grid(row=5, column=1, sticky="ew", padx=(0, 12), pady=5)
+        ctk.CTkLabel(f, text="每行一个", font=("微软雅黑", 11),
+                     text_color="#6b7280").grid(row=5, column=2, padx=(4, 12))
 
-        ttk.Checkbutton(f, text="听到签到码后自动签到", variable=self.v_auto).grid(
-            row=7, column=1, sticky="w", pady=2)
-        ttk.Checkbutton(f, text="启用语义匹配(启动稍慢)", variable=self.v_sem).grid(
-            row=8, column=1, sticky="w")
-
-        for c in (1, 2):
-            f.columnconfigure(c, weight=1)
+        sw = ctk.CTkFrame(f, fg_color="transparent")
+        sw.grid(row=6, column=0, columnspan=3, sticky="w", padx=12, pady=(2, 10))
+        ctk.CTkSwitch(sw, text="听到签到码后自动签到", variable=self.v_auto,
+                      progress_color=ACCENT, font=("微软雅黑", 12)).pack(side="left", padx=(0, 24))
+        ctk.CTkSwitch(sw, text="语义匹配(启动稍慢)", variable=self.v_sem,
+                      progress_color=ACCENT, font=("微软雅黑", 12)).pack(side="left")
 
     def _build_buttons(self):
-        b = ttk.Frame(self.root, padding=(8, 0))
-        b.pack(fill="x")
-        self.b_start = ttk.Button(b, text="▶ 启动监控", command=self.start_monitor)
-        self.b_stop = ttk.Button(b, text="■ 停止", command=self.stop_monitor, state="disabled")
-        ttk.Button(b, text="保存配置", command=self.save_cfg).pack(side="left", padx=3)
-        self.b_start.pack(side="left", padx=3)
-        self.b_stop.pack(side="left", padx=3)
-        ttk.Button(b, text="登录/刷新登录态", command=self.do_login).pack(side="left", padx=3)
-        ttk.Button(b, text="测试企微推送", command=self.test_webhook).pack(side="left", padx=3)
-        ttk.Button(b, text="打开直播页", command=self.open_url).pack(side="left", padx=3)
+        b = ctk.CTkFrame(self, fg_color="transparent")
+        b.pack(fill="x", padx=20, pady=8)
+        self.b_start = ctk.CTkButton(b, text="▶  启动监控", command=self.start_monitor,
+                                     fg_color=GREEN, hover_color="#16a34a",
+                                     font=("微软雅黑", 13, "bold"), height=36, width=130,
+                                     corner_radius=8)
+        self.b_start.pack(side="left", padx=(0, 8))
+        self.b_stop = ctk.CTkButton(b, text="■  停止", command=self.stop_monitor,
+                                    fg_color=RED, hover_color="#dc2626",
+                                    font=("微软雅黑", 13, "bold"), height=36, width=96,
+                                    corner_radius=8, state="disabled")
+        self.b_stop.pack(side="left", padx=(0, 8))
+        ctk.CTkButton(b, text="保存配置", command=self.save_cfg, height=36,
+                      fg_color="#374151", hover_color="#4b5563",
+                      font=("微软雅黑", 12), corner_radius=8).pack(side="left", padx=4)
+        ctk.CTkButton(b, text="登录/刷新登录态", command=self.do_login, height=36,
+                      fg_color="#374151", hover_color="#4b5563",
+                      font=("微软雅黑", 12), corner_radius=8).pack(side="left", padx=4)
+        ctk.CTkButton(b, text="测试企微推送", command=self.test_webhook, height=36,
+                      fg_color="#374151", hover_color="#4b5563",
+                      font=("微软雅黑", 12), corner_radius=8).pack(side="left", padx=4)
+        ctk.CTkButton(b, text="打开直播页", command=self.open_url, height=36,
+                      fg_color="#374151", hover_color="#4b5563",
+                      font=("微软雅黑", 12), corner_radius=8).pack(side="left", padx=4)
 
     def _build_log(self):
-        ttk.Label(self.root, text="运行日志", padding=(8, 4)).pack(anchor="w")
-        self.log = scrolledtext.ScrolledText(self.root, height=18, state="disabled",
-                                             font=("Consolas", 9))
-        self.log.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.log = ctk.CTkTextbox(self, font=("Consolas", 11), fg_color="#12121a",
+                                  corner_radius=12, border_color="#33334a", border_width=1)
+        self.log.pack(fill="both", expand=True, padx=16, pady=(0, 14))
+        self.log.insert("end", "EchoSign 就绪。填好配置 → 保存 → 登录登录态 → 启动监控。\n")
+        self.log.configure(state="disabled")
 
     # ---------- 字段 <-> 配置 ----------
     def _load_fields(self):
@@ -150,7 +199,6 @@ class App:
         self.v_auto.set(bool((self.cfg.get("auto_sign") or {}).get("enabled", True)))
         self.v_sem.set(bool(((self.cfg.get("rules") or {}).get("semantic") or {}).get("enabled", False)))
         rules = (self.cfg.get("rules") or {}).get("strong", [])
-        self.txt_rules.delete("1.0", "end")
         self.txt_rules.insert("1.0", "\n".join(str(r) for r in rules))
 
     def save_cfg(self):
@@ -191,17 +239,22 @@ class App:
         self.worker = threading.Thread(target=run, daemon=True)
         self.worker.start()
 
+    def _set_status(self, text: str, color: str):
+        self.status_dot.configure(text=f"● {text}", text_color=color)
+
     def start_monitor(self):
         self.save_cfg()
         self.stop_event.clear()
-        self.b_start.config(state="disabled")
-        self.b_stop.config(state="normal")
+        self.b_start.configure(state="disabled")
+        self.b_stop.configure(state="normal")
+        self._set_status("监控中", GREEN)
 
         def done_watch():
             while self.worker and self.worker.is_alive():
                 time.sleep(0.3)
-            self.root.after(0, lambda: (self.b_start.config(state="normal"),
-                                        self.b_stop.config(state="disabled")))
+            self.after(0, lambda: (self.b_start.configure(state="normal"),
+                                   self.b_stop.configure(state="disabled"),
+                                   self._set_status("未运行", "#6b7280")))
 
         import main as m
 
@@ -238,23 +291,17 @@ class App:
         try:
             while True:
                 line = self.log_q.get_nowait()
-                self.log.config(state="normal")
+                self.log.configure(state="normal")
                 self.log.insert("end", line + "\n")
                 self.log.see("end")
-                self.log.config(state="disabled")
+                self.log.configure(state="disabled")
         except queue.Empty:
             pass
-        self.root.after(200, self._poll_log)
+        self.after(200, self._poll_log)
 
 
 def main() -> int:
-    root = tk.Tk()
-    try:
-        from tkinter import font  # noqa: F401
-    except Exception:  # noqa: BLE001
-        pass
-    App(root)
-    root.mainloop()
+    App().mainloop()
     return 0
 
 
