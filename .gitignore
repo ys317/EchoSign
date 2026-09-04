@@ -21,3 +21,4 @@ build/
 *.spec
 sign_out.txt
 sign_err.txt
+*.zip
