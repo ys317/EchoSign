@@ -11,6 +11,7 @@ import pathlib
 import sys
 import time
 
+import yaml
 from playwright.sync_api import sync_playwright
 
 from browser_login import ROOT, _cleanup_stale_profile, load_secrets, try_sso_login
