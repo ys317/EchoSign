@@ -56,4 +56,4 @@ alert:
   log_file: alerts.jsonl
   dedup_seconds: 90 # 相同文本在该时间内不重复告警
   webhook: # 企业微信群机器人: 群设置->群机器人->添加->复制 Webhook 地址
-    url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=在这里填你的机器人key" # 形如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=在这里填你的机器人key
+    url: "" # 可选；填写完整的企业微信机器人 Webhook 地址，留空则不推送

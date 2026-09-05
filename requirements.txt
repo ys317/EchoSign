@@ -1,3 +1,9 @@
-# 追加到 requirements.txt
-playwright
-requests
+# Runtime versions used for the Windows v1.2 build (Python 3.13).
+customtkinter==6.0.0
+PyYAML==6.0.3
+numpy==2.4.6
+SoundCard==0.4.6
+sherpa-onnx==1.13.7
+fastembed==0.8.0
+playwright==1.59.0
+requests==2.34.2
