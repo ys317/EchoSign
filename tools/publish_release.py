@@ -53,6 +53,48 @@ def verify_asset(asset: dict, path: Path) -> None:
         raise RuntimeError(f"Uploaded asset does not match the local file: {path.name}")
 
 
+def find_release(client, api: str, tag: str):
+    # Looking up a tag can return 404 for an existing draft. The authenticated
+    # release list includes drafts, so a retry must search it before creating one.
+    matches = []
+    page = 1
+    while True:
+        releases = checked(client.get(api + "/releases",
+                                      params={"per_page": 100, "page": page}, timeout=30))
+        matches.extend(release for release in releases if release["tag_name"] == tag)
+        if len(releases) < 100:
+            break
+        page += 1
+    if len(matches) > 1:
+        raise RuntimeError(f"Multiple releases exist for {tag}; inspect the drafts before continuing")
+    return matches[0] if matches else None
+
+
+def upload_asset(client, api: str, release: dict, path: Path) -> dict:
+    try:
+        with ProgressFile(path) as stream:
+            response = client.post(release["upload_url"].split("{", 1)[0],
+                params={"name": path.name}, data=stream, timeout=(30, 600),
+                headers={"Content-Type": "application/zip" if path.suffix == ".zip" else "text/plain"})
+    except requests.RequestException as exc:
+        # The server may have accepted every byte even if its response was lost.
+        # Confirm the existing asset before doing any further write operation.
+        print("Upload connection interrupted; checking the remote asset", flush=True)
+        for attempt in range(3):
+            current = checked(client.get(api + f"/releases/{release['id']}", timeout=30))
+            uploaded = next((asset for asset in current["assets"]
+                             if asset["name"] == path.name and asset["state"] == "uploaded"), None)
+            if uploaded:
+                verify_asset(uploaded, path)
+                return uploaded
+            if attempt < 2:
+                time.sleep(2)
+        raise RuntimeError("Upload could not be confirmed; the release remains a draft") from exc
+    uploaded = checked(response)
+    verify_asset(uploaded, path)
+    return uploaded
+
+
 class ProgressFile(io.BufferedReader):
     def __init__(self, path: Path):
         super().__init__(io.FileIO(path, "rb"))
@@ -107,13 +149,11 @@ def main() -> None:
         if tag["sha"] != commit:
             raise RuntimeError("The remote tag does not match the release commit")
 
-        response = client.get(api + f"/releases/tags/{VERSION}", timeout=30)
-        if response.status_code == 404:
+        release = find_release(client, api, VERSION)
+        if release is None:
             release = checked(client.post(api + "/releases", timeout=30, json={
                 "tag_name": VERSION, "target_commitish": commit, "name": f"EchoSign {VERSION}",
                 "draft": True, "prerelease": False, "body": notes}))
-        else:
-            release = checked(response)
         print(f"Release {release['id']}: {VERSION}, draft={release['draft']}", flush=True)
         existing = {asset["name"]: asset for asset in release["assets"]}
         if set(existing) - {p.name for p in assets}:
@@ -125,11 +165,7 @@ def main() -> None:
             if not release["draft"]:
                 raise RuntimeError("Refusing to modify assets in a published release")
             print(f"Uploading {path.name} ({path.stat().st_size / 1024 ** 2:.1f} MiB)", flush=True)
-            with ProgressFile(path) as stream:
-                uploaded = checked(client.post(release["upload_url"].split("{", 1)[0],
-                    params={"name": path.name}, data=stream, timeout=(30, 600),
-                    headers={"Content-Type": "application/zip" if path.suffix == ".zip" else "text/plain"}))
-            verify_asset(uploaded, path)
+            upload_asset(client, api, release, path)
         release = checked(client.get(api + f"/releases/{release['id']}", timeout=30))
         remote_assets = {asset["name"]: asset for asset in release["assets"]}
         for path in assets:
