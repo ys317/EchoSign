@@ -35,6 +35,7 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--sign":
 
 import customtkinter as ctk  # noqa: E402
 import yaml  # noqa: E402
+from PIL import Image, ImageDraw  # noqa: E402
 
 CONFIG = APP_ROOT / "config.yaml"
 SECRETS = APP_ROOT / "secrets_local.json"
@@ -47,16 +48,16 @@ FM = "Cascadia Mono"
 
 # (浅色, 深色)：中性侧栏、低对比边界与黑白主操作，参考 Codex 桌面界面。
 # 明确选择中文无衬线字体，避免 Segoe UI 的中文回退变成细宋体。
-BG = ("#fafaf9", "#212121")
-CARD = ("#f1f1ef", "#181818")
-SURFACE = ("#efefed", "#292929")
-RAIL = ("#e2e2df", "#333333")
-INPUT_BG = ("#fafaf9", "#202020")
-INPUT_BORDER = ("#d7d7d3", "#3a3a3a")
+BG = ("#f8f8f7", "#212121")
+CARD = ("#eeeeec", "#181818")
+SURFACE = ("#f1f1ef", "#282828")
+RAIL = ("#e0e0dc", "#343434")
+INPUT_BG = ("#f8f8f7", "#222222")
+INPUT_BORDER = ("#dadad6", "#353535")
 FOCUS = ("#858580", "#8d8d89")
-TXT = ("#252523", "#ededeb")
-TXT2 = ("#555550", "#c6c6c1")
-TXT3 = ("#73736d", "#a3a39d")
+TXT = ("#252523", "#efefed")
+TXT2 = ("#51514d", "#c7c7c2")
+TXT3 = ("#74746e", "#999994")
 GREEN = ("#317450", "#97c4a4")
 AMBER = ("#956824", "#d2b47b")
 RED = ("#ae4650", "#dc959c")
@@ -65,12 +66,12 @@ PRIMARY_HOVER = ("#41413c", "#ffffff")
 BUTTON_TEXT = ("#fafaf9", "#252523")
 BUTTON_DISABLED = ("#b6b6b1", "#777772")
 GHOST_HOVER = ("#e5e5e1", "#30302e")
-TAB_SELECTED = ("#fafaf9", "#41413d")
+TAB_SELECTED = ("#fafaf9", "#303030")
 SW_ON = PRIMARY
 SW_OFF = ("#c7c7c2", "#484844")
 KNOB_ON = BUTTON_TEXT
 KNOB_OFF = ("#ffffff", "#d5d5cf")
-RADIUS = 10
+RADIUS = 9
 
 BTN_FONT = (F, 13, "bold")
 FIELD_FONT = (FL, 15)
@@ -90,6 +91,31 @@ def configure_ui_fonts(root) -> None:
     FM = "Cascadia Mono" if "Cascadia Mono" in families else "Consolas"
     BTN_FONT = (F, 13, "bold")
     FIELD_FONT = (FL, 15)
+
+
+def ui_icon(name, size=16, color=TXT2):
+    """Draw small, theme-aware line icons at native high-DPI resolution."""
+    def draw_icon(ink):
+        image = Image.new("RGBA", (96, 96))
+        draw = ImageDraw.Draw(image)
+        if name == "sun":
+            draw.ellipse((33, 33, 63, 63), outline=ink, width=7)
+            for angle in range(0, 360, 45):
+                a = math.radians(angle)
+                draw.line([(48 + math.cos(a) * r, 48 + math.sin(a) * r)
+                           for r in (32, 41)], fill=ink, width=6)
+        elif name == "moon":
+            draw.arc((17, 17, 79, 79), 25, 285, fill=ink, width=7)
+            draw.arc((40, 1, 95, 59), 88, 188, fill=ink, width=7)
+        elif name == "play":
+            draw.polygon(((32, 22), (74, 48), (32, 74)), fill=ink)
+        elif name == "stop":
+            draw.rounded_rectangle((27, 27, 69, 69), radius=8, fill=ink)
+        return image
+
+    colors = color if isinstance(color, (tuple, list)) else (color, color)
+    return ctk.CTkImage(light_image=draw_icon(colors[0]),
+                        dark_image=draw_icon(colors[1]), size=(size, size))
 
 
 def load_cfg() -> dict:
@@ -197,7 +223,7 @@ class Entry(ctk.CTkEntry):
         kw.setdefault("border_width", 1)
         kw.setdefault("corner_radius", RADIUS)
         kw.setdefault("text_color", TXT)
-        kw.setdefault("height", 42)
+        kw.setdefault("height", 40)
         kw.setdefault("font", FIELD_FONT)
         super().__init__(master, **kw)
         self.invalid = False
@@ -309,19 +335,19 @@ class App(ctk.CTk):
         self._monitor_panel(body)
 
     def _settings(self, body):
-        card = ctk.CTkFrame(body, width=340, fg_color=CARD, corner_radius=0)
+        card = ctk.CTkFrame(body, width=328, fg_color=CARD, corner_radius=0)
         card.grid(row=0, column=0, sticky="nsew")
         card.grid_propagate(False)
         card.pack_propagate(False)
         header = ctk.CTkFrame(card, fg_color="transparent")
-        header.pack(fill="x", padx=24, pady=(24, 18))
-        self._label(header, "设置", 16, TXT, True).pack(side="left")
+        header.pack(fill="x", padx=24, pady=(22, 20))
+        self._label(header, "设置", 15, TXT, True).pack(side="left")
         self.b_save = self._button(
             header, "保存", self.save_cfg, width=52, height=30)
         self.b_save.pack(side="right")
 
-        tabbar = ctk.CTkFrame(card, fg_color=SURFACE, corner_radius=RADIUS)
-        tabbar.pack(fill="x", padx=20, pady=(0, 22))
+        tabbar = ctk.CTkFrame(card, fg_color="transparent")
+        tabbar.pack(fill="x", padx=20, pady=(0, 24))
         tabbar.grid_columnconfigure((0, 1, 2), weight=1, uniform="tabs")
         for i, (key, title) in enumerate((
                 ("basic", "直播与账号"), ("rules", "识别设置"),
@@ -329,13 +355,12 @@ class App(ctk.CTk):
             tab = self._button(
                 tabbar, title, lambda k=key: self._select_tab(k),
                 width=0, height=34, font=(F, 12), corner_radius=8)
-            tab.grid(row=0, column=i, sticky="ew", padx=3, pady=3)
+            tab.grid(row=0, column=i, sticky="ew", padx=2)
             self._tabs[key] = tab
 
         # 底部操作独立于滚动内容，小窗口中也始终可见。
         actions = ctk.CTkFrame(card, fg_color="transparent")
         actions.pack(side="bottom", fill="x", padx=24, pady=(0, 24))
-        self._divider(actions, pady=(12, 12))
         self._save_state = self._label(
             actions, "", 12, TXT3, height=18)
         self._save_state.pack(fill="x", pady=(0, 8))
@@ -343,18 +368,23 @@ class App(ctk.CTk):
         row.pack(fill="x")
         row.grid_columnconfigure(0, weight=1)
         self.b_start = self._button(
-            row, "启动监控", self.start_monitor, height=44, corner_radius=14,
+            row, "启动监控", self.start_monitor, height=44, corner_radius=22,
             fg_color=PRIMARY, hover_color=PRIMARY_HOVER,
             text_color=BUTTON_TEXT, text_color_disabled=BUTTON_DISABLED,
+            image=ui_icon("play", 15, BUTTON_TEXT), compound="left",
             font=(F, 14, "bold"))
         self.b_start.grid(row=0, column=0, sticky="ew")
         self.b_stop = self._button(
-            row, "停止", self.stop_monitor, width=70, height=44,
-            corner_radius=14, border_width=1, border_color=RAIL, state="disabled")
-        self.b_stop.grid(row=0, column=1, padx=(10, 0))
+            row, "停止监控", self.stop_monitor, height=44, corner_radius=22,
+            fg_color=PRIMARY, hover_color=PRIMARY_HOVER,
+            text_color=BUTTON_TEXT, text_color_disabled=BUTTON_DISABLED,
+            image=ui_icon("stop", 15, BUTTON_TEXT), compound="left",
+            font=(F, 14, "bold"), state="disabled")
+        self.b_stop.grid(row=0, column=0, sticky="ew")
+        self.b_stop.grid_remove()
 
         content = ctk.CTkFrame(card, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=(18, 12))
+        content.pack(fill="both", expand=True, padx=(24, 14))
         content.grid_rowconfigure(0, weight=1)
         content.grid_columnconfigure(0, weight=1)
         for key in self._tabs:
@@ -372,7 +402,7 @@ class App(ctk.CTk):
 
     def _field(self, parent, key, title, var, show="", action=None):
         box = ctk.CTkFrame(parent, fg_color="transparent")
-        box.pack(fill="x", pady=(0, 16))
+        box.pack(fill="x", pady=(0, 18))
         caption = ctk.CTkFrame(box, fg_color="transparent", height=22)
         caption.pack(fill="x", pady=(0, 7))
         caption.pack_propagate(False)
@@ -391,7 +421,7 @@ class App(ctk.CTk):
     def _basic_page(self, page):
         self._field(page, "url", "直播网址", self.v_url,
                     action=("打开 ↗", self.open_url))
-        self._divider(page, 8)
+        self._divider(page, (4, 18))
         row = ctk.CTkFrame(page, fg_color="transparent")
         row.pack(fill="x")
         row.grid_columnconfigure((0, 1), weight=1, uniform="account")
@@ -408,7 +438,7 @@ class App(ctk.CTk):
             page, "登录 / 刷新", self.do_login, width=116, height=34,
             border_color=INPUT_BORDER, border_width=1)
         self.b_login.pack(anchor="w")
-        self._divider(page, 18)
+        self._divider(page, (22, 20))
         self._switch_row(
             page, "自动签到", "识别到签到码后自动提交", self.v_auto)
 
@@ -482,9 +512,9 @@ class App(ctk.CTk):
         panel.grid(row=0, column=1, sticky="nsew")
 
         header = ctk.CTkFrame(panel, fg_color="transparent")
-        header.pack(fill="x", padx=36, pady=(24, 26))
+        header.pack(fill="x", padx=32, pady=(22, 28))
         self._label(header, "实时监控", 16, TXT, True).pack(side="left")
-        status = ctk.CTkFrame(header, fg_color=SURFACE, corner_radius=14)
+        status = ctk.CTkFrame(header, fg_color="transparent")
         status.pack(side="left", padx=(14, 0))
         self._dot = self._label(status, "●", 8, TXT3)
         self._dot.pack(side="left", padx=(10, 5), pady=6)
@@ -492,43 +522,41 @@ class App(ctk.CTk):
         self._status.pack(side="left", padx=(0, 10), pady=6)
         self.b_theme = self._button(
             header, "浅色" if self._appearance == "dark" else "深色",
-            self.toggle_theme, width=58, height=30, font=(F, 12, "bold"),
-            fg_color=SURFACE, corner_radius=15)
+            self.toggle_theme, width=72, height=30, font=(F, 12),
+            image=ui_icon("sun" if self._appearance == "dark" else "moon", 16),
+            compound="left", corner_radius=8)
         self.b_theme.pack(side="right")
 
-        meta = ctk.CTkFrame(panel, fg_color="transparent")
-        meta.pack(fill="x", padx=38, pady=(0, 28))
-        self._metrics = {}
-        for key, title, value, side in (
-                ("time", "运行", "00:00:00", "left"),
-                ("code", "签到码", "— — — —", "right")):
-            cell = ctk.CTkFrame(meta, fg_color="transparent")
-            cell.pack(side=side)
-            self._label(cell, title, 12, TXT3).pack(side="left", padx=(0, 10))
-            number = ctk.CTkLabel(
-                cell, text=value, height=24,
-                font=(FM, 16 if key == "code" else 13), text_color=TXT2)
-            number.pack(side="left")
-            self._metrics[key] = number
-
-        # 固定转写区高度，让长句也不会挤占日志和操作区域。
-        transcript = ctk.CTkFrame(panel, fg_color="transparent", height=140)
-        transcript.pack(fill="x", padx=38)
+        # 将转写和运行信息收进同一个轻量区域，保持活动记录的阅读空间。
+        transcript = ctk.CTkFrame(
+            panel, fg_color=SURFACE, height=202, corner_radius=18,
+            border_width=1, border_color=RAIL)
+        transcript.pack(fill="x", padx=32)
         transcript.pack_propagate(False)
-        self._label(transcript, "实时转写", 12, TXT3, True).pack(
-            anchor="w", pady=(0, 14))
+        caption = ctk.CTkFrame(transcript, fg_color="transparent")
+        caption.pack(fill="x", padx=24, pady=(18, 12))
+        self._label(caption, "实时转写", 12, TXT3).pack(side="left")
+        self._metrics = {}
+        timer = self._label(caption, "00:00:00", 12, TXT3, family=FM)
+        timer.pack(side="right")
+        self._metrics["time"] = timer
+
+        code_row = ctk.CTkFrame(transcript, fg_color="transparent")
+        code_row.pack(side="bottom", fill="x", padx=24, pady=(4, 18))
+        self._label(code_row, "签到码", 12, TXT3).pack(side="left", padx=(0, 12))
+        code = self._label(code_row, "— — — —", 16, TXT2, family=FM)
+        code.pack(side="left")
+        self._metrics["code"] = code
         self._transcript = self._label(
-            transcript, "等待课堂声音…", 21, TXT2,
-            wraplength=520, justify="left", height=88, anchor="nw")
-        self._transcript.pack(fill="both", expand=True, pady=(0, 8))
+            transcript, "等待课堂声音…", 22, TXT2,
+            wraplength=520, justify="left", height=84, anchor="nw")
+        self._transcript.pack(fill="both", expand=True, padx=24, pady=(0, 10))
         transcript.bind("<Configure>", lambda e: self._transcript.configure(
-            wraplength=max(200, int(e.width / self._transcript._get_widget_scaling()) - 2)),
+            wraplength=max(200, int(e.width / self._transcript._get_widget_scaling()) - 52)),
             add="+")
 
-        ctk.CTkFrame(panel, height=1, fg_color=RAIL, corner_radius=0).pack(
-            fill="x", padx=38, pady=(8, 0))
         head = ctk.CTkFrame(panel, fg_color="transparent")
-        head.pack(fill="x", padx=38, pady=(20, 12))
+        head.pack(fill="x", padx=34, pady=(28, 14))
         self._label(head, "活动记录", 13, TXT2, True).pack(side="left")
         self._button(head, "清空", self.clear_log, width=42, height=28,
                      font=(F, 12)).pack(side="right")
@@ -541,10 +569,10 @@ class App(ctk.CTk):
         self.log = ctk.CTkTextbox(
             panel, font=(F, 14), height=100, fg_color=BG,
             text_color=TXT2, border_width=0, corner_radius=0,
-            wrap="word", spacing1=5, spacing3=5,
+            wrap="word", spacing1=7, spacing3=7,
             scrollbar_button_color=BG,
             scrollbar_button_hover_color=INPUT_BORDER)
-        self.log.pack(fill="both", expand=True, padx=32, pady=(0, 24))
+        self.log.pack(fill="both", expand=True, padx=28, pady=(0, 24))
         self._apply_log_colors()
         self.log.configure(state="disabled")
         self._empty_log = self._label(self.log, "暂无活动记录", 13, TXT3)
@@ -588,7 +616,7 @@ class App(ctk.CTk):
             self._mark_dirty()
 
     def _feedback(self, message, error=False):
-        self._save_state.configure(text=message, text_color=RED if error else GREEN)
+        self._save_state.configure(text=message, text_color=RED if error else TXT3)
         self.logline(f"[!] {message}" if error else f"[i] {message}")
 
     def _field_error(self, key, message):
@@ -654,7 +682,8 @@ class App(ctk.CTk):
         self._appearance = "light" if self._appearance == "dark" else "dark"
         ctk.set_appearance_mode(self._appearance)
         self.b_theme.configure(
-            text="浅色" if self._appearance == "dark" else "深色")
+            text="浅色" if self._appearance == "dark" else "深色",
+            image=ui_icon("sun" if self._appearance == "dark" else "moon", 16))
         self._apply_log_colors()
         # 单独记住主题，不提交表单中尚未保存的账号或其他修改。
         cfg = copy.deepcopy(self.cfg)
@@ -692,7 +721,9 @@ class App(ctk.CTk):
             self._metrics["code"].configure(text="— — — —", text_color=TXT)
             self._transcript.configure(text="正在等待课堂声音…", text_color=TXT3)
             self.b_start.configure(text="正在监控")
-            self.b_stop.configure(state="normal", text="停止", text_color=RED)
+            self.b_start.grid_remove()
+            self.b_stop.configure(state="normal", text="停止监控")
+            self.b_stop.grid()
             self._set_status(AMBER, "正在启动")
         elif kind == "login":
             self.b_login.configure(text="登录中…")
@@ -735,7 +766,9 @@ class App(ctk.CTk):
         self._t0 = None
         self.worker = None
         self.b_start.configure(state="normal", text="启动监控")
-        self.b_stop.configure(state="disabled", text="停止", text_color=TXT3)
+        self.b_stop.configure(state="disabled", text="停止监控")
+        self.b_stop.grid_remove()
+        self.b_start.grid()
         self.b_login.configure(state="normal", text="登录 / 刷新")
         self.b_test.configure(state="normal", text="测试推送")
         if failed:
