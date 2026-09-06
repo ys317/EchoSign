@@ -13,28 +13,41 @@ python -m venv .venv
 
 将发行包中的 `models/` 复制到项目根目录，即可使用本地识别模型。个人配置沿用根目录中的 `config.yaml` 等文件，不应提交到仓库。
 
-命令行入口为 `python -m echosign.cli`，支持 `devices`、`run`、`code`、`demo` 等子命令。
+图形界面与命令行共用 `python -m echosign` 入口：
+
+```powershell
+python -m echosign --help
+python -m echosign devices
+python -m echosign run --config config.yaml
+python -m echosign test --help
+python -m echosign code
+```
+
+`demo` 用于检查匹配规则，`--login` 打开登录浏览器。`test` 与 `run` 使用配置中的通知和签到选项；离线调试时应关闭 `auto_sign.enabled` 并清空 Webhook。
 
 ## 构建
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pyinstaller==6.22.2
-.\.venv\Scripts\python.exe tools/build_release.py
+.\.venv\Scripts\python.exe tools/release.py build
 ```
 
-构建工具准备匹配的浏览器和语义模型，生成独立目录，再打包到 `dist/releases/`。语音模型从项目根目录的 `models/` 读取。首次准备缺失依赖时需要联网。
+构建工具准备匹配的浏览器和语义模型，在 `build/releases/<版本>/` 生成独立目录，再打包到 `dist/releases/<版本>/`。语音模型从项目根目录的 `models/` 读取。首次准备缺失依赖时需要联网。
 
-维护者提交代码并推送对应版本标签后，可运行 `python tools/publish_release.py --notes <发布说明.md>`，将已构建的 ZIP 发布到 GitHub `origin` 仓库。
+版本号统一维护在 `echosign/__init__.py`，Windows 版本资源由构建工具自动生成。发布前先定稿代码、文档和图片，再构建；工具会校验源码摘要，避免上传与代码不一致的包。
+
+维护者提交代码并推送对应版本标签后，可运行 `python tools/release.py publish --notes <发布说明.md>`，将已构建的 ZIP 发布到 GitHub `origin` 仓库。
 
 ## 目录
 
 | 目录 | 内容 |
 | --- | --- |
-| `echosign/` | 界面、声音识别、规则及浏览器功能 |
+| `echosign/` | 应用代码，按职责划分模块 |
 | `tests/` | 自动化测试与音频样本 |
-| `tools/` | 构建与维护工具 |
-| `packaging/` | Windows 打包配置与版本资源 |
+| `tools/` | `release.py` 构建与发布；`assets.py` 资源维护；`EchoSign.spec` 打包配置 |
 | `assets/`、`docs/` | 图标、截图与文档 |
+
+应用内部由 `audio.py` 负责采集和转写，`rules.py` 负责匹配与提码，`monitor.py` 连接识别流程；`attendance.py` 管理签到任务与结果，`browser.py` 负责网页操作。`gui.py` 管理界面状态，`ui.py` 集中维护主题和通用控件，`runtime.py` 处理源码与便携版的资源路径。
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v

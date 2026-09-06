@@ -16,7 +16,7 @@ browser_profile/
 dist/
 build/
 *.spec
-!packaging/EchoSign.spec
+!tools/EchoSign.spec
 sign_out.txt
 sign_err.txt
 *.zip

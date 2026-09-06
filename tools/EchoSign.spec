@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(SPECPATH).resolve().parent
 BROWSERS = ROOT / 'build' / 'portable-runtime' / 'browsers'
 if not BROWSERS.is_dir():
-    raise RuntimeError('Use python tools/build_release.py to prepare the portable runtime.')
+    raise RuntimeError('Use python tools/release.py build to prepare the portable runtime.')
 
 datas = [(str(ROOT / 'config.example.yaml'), '.'),
          (str(ROOT / 'assets' / 'echosign.ico'), 'assets'),
@@ -42,7 +42,7 @@ exe = EXE(
     exclude_binaries=True,
     name='EchoSign',
     icon=str(ROOT / 'assets' / 'echosign.ico'),
-    version=str(ROOT / 'packaging' / 'windows_version.txt'),
+    version=str(ROOT / 'build' / 'windows-version.txt'),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

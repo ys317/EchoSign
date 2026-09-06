@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from publish_release import find_release, sha256, upload_asset
+from release import find_release, sha256, upload_asset
 
 
 def response(payload):
@@ -62,7 +62,7 @@ class ReleaseTests(unittest.TestCase):
             client = MagicMock()
             client.post.side_effect = requests.ConnectionError("Upload interrupted")
             client.get.return_value = response({"assets": []})
-            with patch("publish_release.time.sleep"), self.assertRaisesRegex(RuntimeError, "remains a draft"):
+            with patch("release.time.sleep"), self.assertRaisesRegex(RuntimeError, "remains a draft"):
                 upload_asset(client, "https://api.example/repo", {"id": 1, "upload_url": "https://upload.example"}, path)
             self.assertEqual(client.post.call_count, 1)
             client.patch.assert_not_called()

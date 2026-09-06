@@ -17,12 +17,12 @@ import unittest
 
 import numpy as np
 
-from echosign import browser_sign
-from echosign import cli as monitor
+from echosign import browser
+from echosign import monitor
 from echosign.__main__ import main as app_main
-from echosign.autosign import AutoSigner
-from echosign.capture import LoopbackSource
-from echosign.sign_result import SignResult, classify_response
+from echosign.attendance import AutoSigner
+from echosign.audio import LoopbackSource
+from echosign.attendance import SignResult, classify_response
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,7 +62,7 @@ class SignResultTests(unittest.TestCase):
         for url, method, expected in cases:
             response = SimpleNamespace(url=url, request=SimpleNamespace(method=method))
             with self.subTest(url=url, method=method):
-                self.assertEqual(browser_sign.is_sign_response(response, "1234"), expected)
+                self.assertEqual(browser.is_sign_response(response, "1234"), expected)
 
     def test_listener_is_armed_only_around_submission(self):
         page = MagicMock()
@@ -79,17 +79,17 @@ class SignResultTests(unittest.TestCase):
             elif text == "课堂签到":
                 events.append("open")
 
-        with patch.object(browser_sign, "click_visible", side_effect=click), redirect_stdout(StringIO()):
-            result = browser_sign.sign_with_code(None, page, "1234")
+        with patch.object(browser, "click_visible", side_effect=click), redirect_stdout(StringIO()):
+            result = browser.sign_with_code(None, page, "1234")
         self.assertEqual(events, ["open", "armed", "submit", "finished"])
         self.assertEqual(result.status, "failure")
 
     def test_browser_response_timeout_is_unknown(self):
         page = MagicMock()
         page.query_selector_all.return_value = []
-        page.expect_response.return_value.__exit__.side_effect = browser_sign.PlaywrightTimeoutError("timeout")
-        with patch.object(browser_sign, "click_visible"), redirect_stdout(StringIO()):
-            result = browser_sign.sign_with_code(None, page, "1234")
+        page.expect_response.return_value.__exit__.side_effect = browser.PlaywrightTimeoutError("timeout")
+        with patch.object(browser, "click_visible"), redirect_stdout(StringIO()):
+            result = browser.sign_with_code(None, page, "1234")
         self.assertEqual(result.status, "unknown")
 
     def test_browser_writes_structured_result_without_stdout(self):
@@ -101,14 +101,14 @@ class SignResultTests(unittest.TestCase):
                 context.pages = [MagicMock()]
                 runtime = MagicMock()
                 runtime.__enter__.return_value.chromium.launch_persistent_context.return_value = context
-                stack.enter_context(patch.object(browser_sign, "sync_playwright", return_value=runtime))
-                stack.enter_context(patch.object(browser_sign, "load_secrets", return_value={}))
-                stack.enter_context(patch.object(browser_sign, "_cleanup_stale_profile"))
-                stack.enter_context(patch.object(browser_sign, "_location", return_value=(0, 0)))
-                stack.enter_context(patch.object(browser_sign, "ensure_logged_in"))
-                stack.enter_context(patch.object(browser_sign, "sign_with_code", return_value=result))
+                stack.enter_context(patch.object(browser, "sync_playwright", return_value=runtime))
+                stack.enter_context(patch.object(browser, "load_secrets", return_value={}))
+                stack.enter_context(patch.object(browser, "_cleanup_stale_profile"))
+                stack.enter_context(patch.object(browser, "_location", return_value=(0, 0)))
+                stack.enter_context(patch.object(browser, "ensure_logged_in"))
+                stack.enter_context(patch.object(browser, "sign_with_code", return_value=result))
                 stack.enter_context(patch.object(sys, "stdout", None))
-                exit_code = browser_sign.main(["1234", "--result-file", str(output)])
+                exit_code = browser.sign(["1234", "--result-file", str(output)])
                 self.assertEqual(exit_code, result.exit_code)
                 self.assertEqual(SignResult.read(output, "1234"), result)
                 context.close.assert_called_once()
@@ -122,10 +122,15 @@ class SignResultTests(unittest.TestCase):
             return 1
 
         with patch.object(sys, "frozen", True, create=True), patch.object(sys, "argv", args), \
-                patch("os.chdir"), patch.object(browser_sign, "main", side_effect=fake_main):
+                patch("os.chdir"), patch.object(browser, "sign", side_effect=fake_main):
             exit_code = app_main()
         self.assertEqual(exit_code, 1)
         self.assertEqual(captured, ["1234", "--result-file", "result.json"])
+
+    def test_source_entrypoint_routes_monitor_commands(self):
+        with patch("os.chdir"), patch.object(monitor, "main", return_value=0) as command:
+            self.assertEqual(app_main(["test", "class.wav", "--realtime"]), 0)
+        command.assert_called_once_with(["test", "class.wav", "--realtime"])
 
 
 class DispatcherTests(unittest.TestCase):
@@ -145,7 +150,7 @@ class DispatcherTests(unittest.TestCase):
             return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
 
         signer = AutoSigner(lambda reason, text: notifications.append((reason, text)))
-        with patch("echosign.autosign.subprocess.run", side_effect=child), \
+        with patch("echosign.attendance.subprocess.run", side_effect=child), \
                 patch.object(sys, "frozen", frozen, create=True), redirect_stdout(StringIO()):
             signer._sign_one("1234")
         self.assertEqual(len(notifications), 1)
@@ -187,7 +192,7 @@ class DispatcherTests(unittest.TestCase):
     def test_timeout_is_unknown_and_does_not_retry(self):
         notifications = []
         signer = AutoSigner(lambda reason, text: notifications.append((reason, text)))
-        with patch("echosign.autosign.subprocess.run", side_effect=subprocess.TimeoutExpired("test", 1)) as run, \
+        with patch("echosign.attendance.subprocess.run", side_effect=subprocess.TimeoutExpired("test", 1)) as run, \
                 redirect_stdout(StringIO()):
             signer._sign_one("1234")
         run.assert_called_once()

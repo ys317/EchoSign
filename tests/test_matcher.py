@@ -5,8 +5,8 @@ import unittest
 
 import yaml
 
-from echosign.matcher import RuleMatcher
-from echosign.watcher import SignInWatcher
+from echosign.rules import RuleMatcher
+from echosign.rules import SignInWatcher
 
 
 class MatcherTests(unittest.TestCase):

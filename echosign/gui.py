@@ -16,14 +16,14 @@ import time
 import webbrowser
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from tkinter import font as tkfont
+from tkinter import TclError
 from urllib.parse import urlparse
 
 import customtkinter as ctk
 import yaml
-from PIL import Image, ImageDraw
 
-from echosign import __version__
+from echosign import __version__, ui as design
+from echosign.ui import Entry, Switch
 from echosign.runtime import application_root, resource_root
 
 APP_ROOT = application_root()
@@ -33,80 +33,7 @@ SECRETS = APP_ROOT / "secrets_local.json"
 RESOURCE_ROOT = resource_root()
 
 APP_VERSION = f"v{__version__}"
-F = "Microsoft YaHei UI"
-FL = "Segoe UI Semibold"
-FM = "Cascadia Mono"
-
-# (浅色, 深色)：中性侧栏、低对比边界与黑白主操作，参考 Codex 桌面界面。
-# 明确选择中文无衬线字体，避免 Segoe UI 的中文回退变成细宋体。
-BG = ("#f8f8f7", "#212121")
-CARD = ("#eeeeec", "#181818")
-SURFACE = ("#f1f1ef", "#282828")
-RAIL = ("#e0e0dc", "#343434")
-INPUT_BG = ("#f8f8f7", "#222222")
-INPUT_BORDER = ("#dadad6", "#353535")
-FOCUS = ("#858580", "#8d8d89")
-TXT = ("#252523", "#efefed")
-TXT2 = ("#51514d", "#c7c7c2")
-TXT3 = ("#74746e", "#999994")
-GREEN = ("#317450", "#97c4a4")
-AMBER = ("#956824", "#d2b47b")
-RED = ("#ae4650", "#dc959c")
-PRIMARY = ("#252523", "#e8e8e4")
-PRIMARY_HOVER = ("#41413c", "#ffffff")
-BUTTON_TEXT = ("#fafaf9", "#252523")
-BUTTON_DISABLED = ("#b6b6b1", "#777772")
-GHOST_HOVER = ("#e5e5e1", "#30302e")
-TAB_SELECTED = ("#fafaf9", "#303030")
-SW_ON = PRIMARY
-SW_OFF = ("#c7c7c2", "#484844")
-KNOB_ON = BUTTON_TEXT
-KNOB_OFF = ("#ffffff", "#d5d5cf")
-RADIUS = 9
-
-BTN_FONT = (F, 13, "bold")
-FIELD_FONT = (FL, 15)
-LABEL_FONT = (F, 13)
 MAX_LOG_LINES = 1500
-
-
-def configure_ui_fonts(root) -> None:
-    """Prefer installed medium-weight CJK faces with explicit Windows fallbacks."""
-    global F, FL, FM, BTN_FONT, FIELD_FONT
-    families = set(tkfont.families(root))
-    F = next((name for name in ("Noto Sans SC Medium", "Microsoft YaHei UI",
-                               "Microsoft JhengHei UI") if name in families),
-             "Microsoft YaHei UI")
-    FL = next((name for name in ("Segoe UI Variable Text Semibold", "Segoe UI Semibold",
-                                "Segoe UI") if name in families), "Segoe UI")
-    FM = "Cascadia Mono" if "Cascadia Mono" in families else "Consolas"
-    BTN_FONT = (F, 13, "bold")
-    FIELD_FONT = (FL, 15)
-
-
-def ui_icon(name, size=16, color=TXT2):
-    """Draw small, theme-aware line icons at native high-DPI resolution."""
-    def draw_icon(ink):
-        image = Image.new("RGBA", (96, 96))
-        draw = ImageDraw.Draw(image)
-        if name == "sun":
-            draw.ellipse((33, 33, 63, 63), outline=ink, width=7)
-            for angle in range(0, 360, 45):
-                a = math.radians(angle)
-                draw.line([(48 + math.cos(a) * r, 48 + math.sin(a) * r)
-                           for r in (32, 41)], fill=ink, width=6)
-        elif name == "moon":
-            draw.arc((17, 17, 79, 79), 25, 285, fill=ink, width=7)
-            draw.arc((40, 1, 95, 59), 88, 188, fill=ink, width=7)
-        elif name == "play":
-            draw.polygon(((32, 22), (74, 48), (32, 74)), fill=ink)
-        elif name == "stop":
-            draw.rounded_rectangle((27, 27, 69, 69), radius=8, fill=ink)
-        return image
-
-    colors = color if isinstance(color, (tuple, list)) else (color, color)
-    return ctk.CTkImage(light_image=draw_icon(colors[0]),
-                        dark_image=draw_icon(colors[1]), size=(size, size))
 
 
 def load_cfg() -> dict:
@@ -142,109 +69,16 @@ class QueueWriter:
         pass
 
 
-class Switch(ctk.CTkFrame):
-    """可聚焦的胶囊开关；变量变化与快速连点均能保持显示同步。"""
-
-    W, H, KNOB, PAD = 36, 22, 16, 3
-
-    def __init__(self, master, variable: ctk.BooleanVar, **kw):
-        super().__init__(
-            master, width=self.W, height=self.H, corner_radius=11,
-            fg_color=SW_ON if variable.get() else SW_OFF, **kw)
-        self.var = variable
-        self._anim = 0
-        self._jobs = []
-        self._position = self._x(variable.get())
-        self.knob = ctk.CTkFrame(
-            self, width=self.KNOB, height=self.KNOB, corner_radius=8,
-            fg_color=KNOB_ON if variable.get() else KNOB_OFF)
-        self.knob.place(x=self._position, y=self.PAD)
-        self._canvas.configure(takefocus=1)
-        self.bind("<FocusIn>", lambda _: self.configure(
-            border_width=1, border_color=FOCUS))
-        self.bind("<FocusOut>", lambda _: self.configure(border_width=0))
-        self.bind("<space>", self.toggle)
-        self.bind("<Return>", self.toggle)
-        for widget in (self, self.knob):
-            widget.configure(cursor="hand2")
-            widget.bind("<Button-1>", self.toggle)
-        self._trace = self.var.trace_add("write", self._sync)
-
-    def _x(self, on):
-        return self.W - self.KNOB - self.PAD if on else self.PAD
-
-    def toggle(self, _=None):
-        self._canvas.focus_set()
-        self.var.set(not self.var.get())
-        return "break"
-
-    def _sync(self, *_):
-        self._anim += 1  # 让快速连点留下的旧回调失效。
-        for job in self._jobs:
-            self.after_cancel(job)
-        self._jobs.clear()
-        gen = self._anim
-        on = self.var.get()
-        x0, x1 = self._position, self._x(on)
-        self.configure(fg_color=SW_ON if on else SW_OFF)
-        self.knob.configure(fg_color=KNOB_ON if on else KNOB_OFF)
-        for i in range(1, 5):
-            t = 1 - (1 - i / 4) ** 2
-            self._jobs.append(self.after(
-                i * 20, lambda x=x0 + (x1 - x0) * t: self._paint(x, gen)))
-
-    def _paint(self, x, gen):
-        if gen == self._anim:
-            self._position = x
-            self.knob.place(x=x, y=self.PAD)
-
-    def destroy(self):
-        self.var.trace_remove("write", self._trace)
-        for job in self._jobs:
-            self.after_cancel(job)
-        super().destroy()
-
-
-class Entry(ctk.CTkEntry):
-    """统一的输入框，支持聚焦和字段校验反馈。"""
-
-    def __init__(self, master, **kw):
-        kw.setdefault("fg_color", INPUT_BG)
-        kw.setdefault("border_color", INPUT_BORDER)
-        kw.setdefault("border_width", 1)
-        kw.setdefault("corner_radius", RADIUS)
-        kw.setdefault("text_color", TXT)
-        kw.setdefault("height", 40)
-        kw.setdefault("font", FIELD_FONT)
-        super().__init__(master, **kw)
-        self.invalid = False
-        self.bind("<FocusIn>", lambda _: self.configure(
-            border_color=RED if self.invalid else FOCUS), add="+")
-        self.bind("<FocusOut>", lambda _: self.configure(
-            border_color=RED if self.invalid else INPUT_BORDER), add="+")
-        self.bind("<KeyRelease>", self._editing, add="+")
-
-    def _editing(self, _=None):
-        if self.invalid:
-            self.invalid = False
-            self.configure(border_color=FOCUS)
-
-    def set_error(self):
-        self.invalid = True
-        self.focus_set()
-        self.configure(border_color=RED)
-
-
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        configure_ui_fonts(self)
+        design.configure_ui_fonts(self)
         self.cfg = load_cfg()
         self._appearance = (self.cfg.get("ui") or {}).get("appearance", "dark")
         if self._appearance not in ("light", "dark"):
             self._appearance = "dark"
         ctk.set_appearance_mode(self._appearance)
-        self.configure(fg_color=BG)
+        self.configure(fg_color=design.BG)
         self.title(f"EchoSign {APP_VERSION}")
         icon = RESOURCE_ROOT / "assets" / "echosign.ico"
         if icon.exists():
@@ -262,6 +96,9 @@ class App(ctk.CTk):
         self._loading = True
         self._poll_job = None
         self._tick_job = None
+        self._copy_job = None
+        self._code: str | None = None
+        self._has_transcript = False
         self._pages = {}
         self._tabs = {}
         self._entries = {}
@@ -291,28 +128,28 @@ class App(ctk.CTk):
         self._tick_job = self.after(1000, self._tick)
 
     @staticmethod
-    def _label(parent, text, size=12, color=TXT2, bold=False, family=None, **kw):
+    def _label(parent, text, size=12, color=design.TXT2, bold=False, family=None, **kw):
         kw.setdefault("height", 0)
         kw.setdefault("anchor", "w")
-        family = family or F
+        family = family or design.F
         return ctk.CTkLabel(
             parent, text=text, font=(family, size, "bold") if bold else (family, size),
             text_color=color, **kw)
 
     @staticmethod
     def _divider(parent, pady=16):
-        ctk.CTkFrame(parent, height=1, fg_color=RAIL,
+        ctk.CTkFrame(parent, height=1, fg_color=design.RAIL,
                      corner_radius=0).pack(fill="x", pady=pady)
 
     @staticmethod
     def _button(parent, text, command, **kw):
         kw.setdefault("height", 34)
-        kw.setdefault("corner_radius", RADIUS)
-        kw.setdefault("font", BTN_FONT)
+        kw.setdefault("corner_radius", design.RADIUS)
+        kw.setdefault("font", design.BTN_FONT)
         kw.setdefault("fg_color", "transparent")
-        kw.setdefault("hover_color", GHOST_HOVER)
-        kw.setdefault("text_color", TXT2)
-        kw.setdefault("text_color_disabled", TXT3)
+        kw.setdefault("hover_color", design.GHOST_HOVER)
+        kw.setdefault("text_color", design.TXT2)
+        kw.setdefault("text_color_disabled", design.TXT3)
         return ctk.CTkButton(parent, text=text, command=command, **kw)
 
 
@@ -326,63 +163,51 @@ class App(ctk.CTk):
         self._monitor_panel(body)
 
     def _settings(self, body):
-        card = ctk.CTkFrame(body, width=328, fg_color=CARD, corner_radius=0)
+        card = ctk.CTkFrame(body, width=312, fg_color=design.CARD, corner_radius=0)
         card.grid(row=0, column=0, sticky="nsew")
         card.grid_propagate(False)
         card.pack_propagate(False)
         header = ctk.CTkFrame(card, fg_color="transparent")
-        header.pack(fill="x", padx=24, pady=(22, 20))
-        self._label(header, "设置", 15, TXT, True).pack(side="left")
+        header.pack(fill="x", padx=22, pady=(20, 18))
+        self._label(header, "课堂设置", 14, design.TXT, True).pack(side="left")
         self.b_save = self._button(
             header, "保存", self.save_cfg, width=52, height=30)
         self.b_save.pack(side="right")
 
-        tabbar = ctk.CTkFrame(card, fg_color="transparent")
-        tabbar.pack(fill="x", padx=20, pady=(0, 24))
+        tabbar = ctk.CTkFrame(card, fg_color=design.TAB_BG, corner_radius=11)
+        tabbar.pack(fill="x", padx=22, pady=(0, 22))
         tabbar.grid_columnconfigure((0, 1, 2), weight=1, uniform="tabs")
         for i, (key, title) in enumerate((
-                ("basic", "直播与账号"), ("rules", "识别设置"),
-                ("extras", "通知与定位"))):
+                ("basic", "课堂"), ("rules", "识别"), ("extras", "通知"))):
             tab = self._button(
                 tabbar, title, lambda k=key: self._select_tab(k),
-                width=0, height=34, font=(F, 12), corner_radius=8)
-            tab.grid(row=0, column=i, sticky="ew", padx=2)
+                width=0, height=32, font=(design.F, 12), corner_radius=8)
+            tab.grid(row=0, column=i, sticky="ew", padx=(3, 0) if i < 2 else 3, pady=3)
             self._tabs[key] = tab
 
         # 底部操作独立于滚动内容，小窗口中也始终可见。
         actions = ctk.CTkFrame(card, fg_color="transparent")
-        actions.pack(side="bottom", fill="x", padx=24, pady=(0, 24))
+        actions.pack(side="bottom", fill="x", padx=22, pady=(8, 22))
         self._save_state = self._label(
-            actions, "", 12, TXT3, height=18)
+            actions, "", 11, design.TXT3, height=18)
         self._save_state.pack(fill="x", pady=(0, 8))
-        row = ctk.CTkFrame(actions, fg_color="transparent")
-        row.pack(fill="x")
-        row.grid_columnconfigure(0, weight=1)
-        self.b_start = self._button(
-            row, "启动监控", self.start_monitor, height=44, corner_radius=22,
-            fg_color=PRIMARY, hover_color=PRIMARY_HOVER,
-            text_color=BUTTON_TEXT, text_color_disabled=BUTTON_DISABLED,
-            image=ui_icon("play", 15, BUTTON_TEXT), compound="left",
-            font=(F, 14, "bold"))
-        self.b_start.grid(row=0, column=0, sticky="ew")
-        self.b_stop = self._button(
-            row, "停止监控", self.stop_monitor, height=44, corner_radius=22,
-            fg_color=PRIMARY, hover_color=PRIMARY_HOVER,
-            text_color=BUTTON_TEXT, text_color_disabled=BUTTON_DISABLED,
-            image=ui_icon("stop", 15, BUTTON_TEXT), compound="left",
-            font=(F, 14, "bold"), state="disabled")
-        self.b_stop.grid(row=0, column=0, sticky="ew")
-        self.b_stop.grid_remove()
+        self.b_monitor = self._button(
+            actions, "启动监控", self.toggle_monitor, height=44, corner_radius=14,
+            fg_color=design.PRIMARY, hover_color=design.PRIMARY_HOVER,
+            text_color=design.BUTTON_TEXT, text_color_disabled=design.BUTTON_DISABLED,
+            image=design.ui_icon("play", 15, design.BUTTON_TEXT), compound="left",
+            font=(design.F, 14, "bold"))
+        self.b_monitor.pack(fill="x")
 
         content = ctk.CTkFrame(card, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=(24, 14))
+        content.pack(fill="both", expand=True, padx=(22, 4))
         content.grid_rowconfigure(0, weight=1)
         content.grid_columnconfigure(0, weight=1)
         for key in self._tabs:
             page = ctk.CTkScrollableFrame(
-                content, fg_color=CARD, corner_radius=0,
-                scrollbar_fg_color=CARD, scrollbar_button_color=CARD,
-                scrollbar_button_hover_color=INPUT_BORDER)
+                content, fg_color=design.CARD, corner_radius=0,
+                scrollbar_fg_color=design.CARD, scrollbar_button_color=design.CARD,
+                scrollbar_button_hover_color=design.INPUT_BORDER)
             page.grid(row=0, column=0, sticky="nsew")
             self._pages[key] = page
         self._basic_page(self._pages["basic"])
@@ -393,15 +218,15 @@ class App(ctk.CTk):
 
     def _field(self, parent, key, title, var, show="", action=None):
         box = ctk.CTkFrame(parent, fg_color="transparent")
-        box.pack(fill="x", pady=(0, 18))
+        box.pack(fill="x", pady=(0, 16))
         caption = ctk.CTkFrame(box, fg_color="transparent", height=22)
-        caption.pack(fill="x", pady=(0, 7))
+        caption.pack(fill="x", pady=(0, 6))
         caption.pack_propagate(False)
-        self._label(caption, title, 13, TXT2).pack(side="left")
+        self._label(caption, title, 12, design.TXT2).pack(side="left")
         if action:
             button = self._button(
                 caption, action[0], action[1], width=60, height=22,
-                font=(F, 12), text_color=TXT2)
+                font=(design.F, 12), text_color=design.TXT2)
             button.pack(side="right")
             self._field_actions[key] = button
         entry = Entry(box, textvariable=var, show=show)
@@ -412,40 +237,33 @@ class App(ctk.CTk):
     def _basic_page(self, page):
         self._field(page, "url", "直播网址", self.v_url,
                     action=("打开 ↗", self.open_url))
-        self._divider(page, (4, 18))
-        row = ctk.CTkFrame(page, fg_color="transparent")
-        row.pack(fill="x")
-        row.grid_columnconfigure((0, 1), weight=1, uniform="account")
-        user = ctk.CTkFrame(row, fg_color="transparent")
-        user.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        pwd = ctk.CTkFrame(row, fg_color="transparent")
-        pwd.grid(row=0, column=1, sticky="nsew")
-        self._field(user, "user", "学号", self.v_user)
+        self._divider(page, (2, 12))
+        self._field(page, "user", "学号", self.v_user)
         self.e_pwd = self._field(
-            pwd, "pwd", "密码", self.v_pwd, show="•",
+            page, "pwd", "密码", self.v_pwd, show="•",
             action=("显示密码", self._toggle_password))
         self.b_pwd = self._field_actions["pwd"]
         self.b_login = self._button(
-            page, "登录 / 刷新", self.do_login, width=116, height=34,
-            border_color=INPUT_BORDER, border_width=1)
-        self.b_login.pack(anchor="w")
-        self._divider(page, (22, 20))
+            page, "登录 / 刷新", self.do_login, height=36,
+            border_color=design.INPUT_BORDER, border_width=1)
+        self.b_login.pack(fill="x")
+        self._divider(page, (18, 12))
         self._switch_row(
             page, "自动签到", "识别到签到码后自动提交", self.v_auto)
 
     def _rules_page(self, page):
-        self._label(page, "签到关键词", 14, TXT, True).pack(anchor="w")
-        self._label(page, "每行一项，支持 re: 正则表达式。", 12, TXT3).pack(
-            anchor="w", pady=(2, 10))
+        self._label(page, "签到关键词", 13, design.TXT, True).pack(anchor="w")
+        self._label(page, "每行一项，支持 re: 正则表达式", 11, design.TXT3).pack(
+            anchor="w", pady=(4, 12))
         self.txt_rules = ctk.CTkTextbox(
-            page, height=185, font=(F, 14), fg_color=INPUT_BG,
-            text_color=TXT, border_color=INPUT_BORDER, border_width=1,
-            corner_radius=RADIUS, wrap="word", spacing1=4, spacing3=4)
+            page, height=224, font=(design.F, 13), fg_color=design.INPUT_BG,
+            text_color=design.TXT, border_color=design.INPUT_BORDER, border_width=1,
+            corner_radius=design.RADIUS, wrap="word", spacing1=4, spacing3=4)
         self.txt_rules.pack(fill="x")
         self.txt_rules.bind("<FocusIn>", lambda _: self.txt_rules.configure(
-            border_color=FOCUS), add="+")
+            border_color=design.FOCUS), add="+")
         self.txt_rules.bind("<FocusOut>", lambda _: self.txt_rules.configure(
-            border_color=INPUT_BORDER), add="+")
+            border_color=design.INPUT_BORDER), add="+")
         self._divider(page, 16)
         self._switch_row(
             page, "语义辅助识别", "识别相近话术，在本机运行",
@@ -454,11 +272,12 @@ class App(ctk.CTk):
 
     def _extras_page(self, page):
         self._field(
-            page, "hook", "企业微信 Webhook（可选）", self.v_hook,
+            page, "hook", "企业微信 Webhook", self.v_hook,
             show="•", action=("测试推送", self.test_webhook))
         self.b_test = self._field_actions["hook"]
+        self._label(page, "选填，留空时仅在本机提醒", 11, design.TXT3).pack(anchor="w")
         self._divider(page, 18)
-        self._label(page, "签到位置", 13, TXT2).pack(anchor="w", pady=(0, 8))
+        self._label(page, "签到位置", 13, design.TXT2).pack(anchor="w", pady=(0, 8))
         row = ctk.CTkFrame(page, fg_color="transparent")
         row.pack(fill="x")
         row.grid_columnconfigure((0, 1), weight=1, uniform="location")
@@ -475,8 +294,8 @@ class App(ctk.CTk):
         track.pack(side="right", padx=(14, 2))
         text = ctk.CTkFrame(row, fg_color="transparent")
         text.pack(side="left", fill="x", expand=True)
-        self._label(text, title, 14, TXT, True).pack(anchor="w")
-        description = self._label(text, desc, 12, TXT3, justify="left", wraplength=260)
+        self._label(text, title, 13, design.TXT, True).pack(anchor="w")
+        description = self._label(text, desc, 11, design.TXT3, justify="left", wraplength=260)
         description.pack(fill="x", pady=(3, 0))
         text.bind("<Configure>", lambda e: description.configure(
             wraplength=max(120, int(e.width / description._get_widget_scaling()) - 4)), add="+")
@@ -492,81 +311,92 @@ class App(ctk.CTk):
             else:
                 page.grid_remove()
             self._tabs[name].configure(
-                fg_color=TAB_SELECTED if name == key else "transparent",
-                hover_color=TAB_SELECTED if name == key else GHOST_HOVER,
-                text_color=TXT if name == key else TXT2,
-                font=(F, 12, "bold") if name == key else (F, 12))
+                fg_color=design.TAB_SELECTED if name == key else "transparent",
+                hover_color=design.TAB_SELECTED if name == key else design.GHOST_HOVER,
+                text_color=design.TXT if name == key else design.TXT2,
+                font=(design.F, 12, "bold") if name == key else (design.F, 12))
 
 
     def _monitor_panel(self, body):
-        panel = ctk.CTkFrame(body, fg_color=BG, corner_radius=0)
+        panel = ctk.CTkFrame(body, fg_color=design.BG, corner_radius=0)
         panel.grid(row=0, column=1, sticky="nsew")
 
         header = ctk.CTkFrame(panel, fg_color="transparent")
-        header.pack(fill="x", padx=32, pady=(22, 28))
-        self._label(header, "实时监控", 16, TXT, True).pack(side="left")
+        header.pack(fill="x", padx=32, pady=(20, 26))
+        self._label(header, "课堂监控", 17, design.TXT, True).pack(side="left")
         status = ctk.CTkFrame(header, fg_color="transparent")
-        status.pack(side="left", padx=(14, 0))
-        self._dot = self._label(status, "●", 8, TXT3)
+        status.pack(side="left", padx=(10, 0))
+        self._dot = self._label(status, "●", 8, design.TXT3)
         self._dot.pack(side="left", padx=(10, 5), pady=6)
-        self._status = self._label(status, "就绪", 12, TXT3)
+        self._status = self._label(status, "未开始", 11, design.TXT3)
         self._status.pack(side="left", padx=(0, 10), pady=6)
         self.b_theme = self._button(
             header, "浅色" if self._appearance == "dark" else "深色",
-            self.toggle_theme, width=72, height=30, font=(F, 12),
-            image=ui_icon("sun" if self._appearance == "dark" else "moon", 16),
+            self.toggle_theme, width=72, height=30, font=(design.F, 12),
+            image=design.ui_icon("sun" if self._appearance == "dark" else "moon", 16),
             compound="left", corner_radius=8)
         self.b_theme.pack(side="right")
 
         # 将转写和运行信息收进同一个轻量区域，保持活动记录的阅读空间。
         transcript = ctk.CTkFrame(
-            panel, fg_color=SURFACE, height=202, corner_radius=18,
-            border_width=1, border_color=RAIL)
+            panel, fg_color=design.SURFACE, height=216, corner_radius=16,
+            border_width=1, border_color=design.RAIL)
         transcript.pack(fill="x", padx=32)
         transcript.pack_propagate(False)
         caption = ctk.CTkFrame(transcript, fg_color="transparent")
-        caption.pack(fill="x", padx=24, pady=(18, 12))
-        self._label(caption, "实时转写", 12, TXT3).pack(side="left")
+        caption.pack(fill="x", padx=24, pady=(18, 14))
+        self._label(caption, "实时转写", 12, design.TXT2).pack(side="left")
         self._metrics = {}
-        timer = self._label(caption, "00:00:00", 12, TXT3, family=FM)
+        timer = self._label(caption, "00:00:00", 12, design.TXT3, family=design.FM)
         timer.pack(side="right")
         self._metrics["time"] = timer
 
-        code_row = ctk.CTkFrame(transcript, fg_color="transparent")
-        code_row.pack(side="bottom", fill="x", padx=24, pady=(4, 18))
-        self._label(code_row, "签到码", 12, TXT3).pack(side="left", padx=(0, 12))
-        code = self._label(code_row, "— — — —", 16, TXT2, family=FM)
+        footer = ctk.CTkFrame(transcript, fg_color="transparent")
+        footer.pack(side="bottom", fill="x", padx=24, pady=(0, 16))
+        ctk.CTkFrame(footer, height=1, fg_color=design.RAIL, corner_radius=0).pack(
+            fill="x", pady=(0, 12))
+        code_row = ctk.CTkFrame(footer, fg_color="transparent")
+        code_row.pack(fill="x")
+        self._label(code_row, "签到码", 12, design.TXT3).pack(side="left", padx=(0, 14))
+        code = self._label(code_row, "— — — —", 22, design.TXT3, family=design.FM, bold=True)
         code.pack(side="left")
         self._metrics["code"] = code
+        self.b_copy = self._button(
+            code_row, "复制", self.copy_code, width=74, height=30, font=(design.F, 11),
+            image=design.ui_icon("copy", 14, design.TXT3), compound="left", state="disabled")
+        self.b_copy.pack(side="right")
+        self._transcript_hint = self._label(
+            transcript, "播放课程声音后，点击左侧「启动监控」。", 12, design.TXT3)
+        self._transcript_hint.pack(side="bottom", fill="x", padx=24, pady=(0, 16))
         self._transcript = self._label(
-            transcript, "等待课堂声音…", 22, TXT2,
-            wraplength=520, justify="left", height=84, anchor="nw")
-        self._transcript.pack(fill="both", expand=True, padx=24, pady=(0, 10))
+            transcript, "准备开始课堂监控", 22, design.TXT,
+            wraplength=520, justify="left", height=60, anchor="nw")
+        self._transcript.pack(fill="both", expand=True, padx=24, pady=(0, 8))
         transcript.bind("<Configure>", lambda e: self._transcript.configure(
             wraplength=max(200, int(e.width / self._transcript._get_widget_scaling()) - 52)),
             add="+")
 
         head = ctk.CTkFrame(panel, fg_color="transparent")
-        head.pack(fill="x", padx=34, pady=(28, 14))
-        self._label(head, "活动记录", 13, TXT2, True).pack(side="left")
+        head.pack(fill="x", padx=34, pady=(24, 10))
+        self._label(head, "活动记录", 13, design.TXT2, True).pack(side="left")
         self._button(head, "清空", self.clear_log, width=42, height=28,
-                     font=(F, 12)).pack(side="right")
+                     font=(design.F, 12)).pack(side="right")
         ctk.CTkCheckBox(
             head, text="自动滚动", variable=self.v_follow, width=90, height=22,
             checkbox_width=14, checkbox_height=14, corner_radius=4,
-            border_width=1, border_color=TXT3, fg_color=PRIMARY,
-            hover_color=PRIMARY_HOVER, checkmark_color=BUTTON_TEXT,
-            text_color=TXT3, font=(F, 12)).pack(side="right", padx=(0, 8))
+            border_width=1, border_color=design.TXT3, fg_color=design.PRIMARY,
+            hover_color=design.PRIMARY_HOVER, checkmark_color=design.BUTTON_TEXT,
+            text_color=design.TXT3, font=(design.F, 12)).pack(side="right", padx=(0, 8))
         self.log = ctk.CTkTextbox(
-            panel, font=(F, 14), height=100, fg_color=BG,
-            text_color=TXT2, border_width=0, corner_radius=0,
-            wrap="word", spacing1=7, spacing3=7,
-            scrollbar_button_color=BG,
-            scrollbar_button_hover_color=INPUT_BORDER)
+            panel, font=(design.F, 13), height=100, fg_color=design.BG,
+            text_color=design.TXT2, border_width=0, corner_radius=0,
+            wrap="word", spacing1=6, spacing3=6,
+            scrollbar_button_color=design.BG,
+            scrollbar_button_hover_color=design.INPUT_BORDER)
         self.log.pack(fill="both", expand=True, padx=28, pady=(0, 24))
         self._apply_log_colors()
         self.log.configure(state="disabled")
-        self._empty_log = self._label(self.log, "暂无活动记录", 13, TXT3)
+        self._empty_log = self._label(self.log, "监控开始后，活动记录会显示在这里", 12, design.TXT3)
         self._empty_log.place(relx=0.5, rely=0.5, anchor="center")
 
     # ---------- 配置与即时反馈 ----------
@@ -598,8 +428,8 @@ class App(ctk.CTk):
             dirty = self._field_values() != self._saved_values
             self._save_state.configure(
                 text="有未保存的更改" if dirty else "已保存",
-                text_color=AMBER if dirty else TXT3)
-            self.b_save.configure(text_color=PRIMARY if dirty else TXT2)
+                text_color=design.AMBER if dirty else design.TXT3)
+            self.b_save.configure(text_color=design.PRIMARY if dirty else design.TXT2)
 
     def _rules_changed(self, _=None):
         if self.txt_rules.edit_modified():
@@ -607,8 +437,9 @@ class App(ctk.CTk):
             self._mark_dirty()
 
     def _feedback(self, message, error=False):
-        self._save_state.configure(text=message, text_color=RED if error else TXT3)
-        self.logline(f"[!] {message}" if error else f"[i] {message}")
+        self._save_state.configure(text=message, text_color=design.RED if error else design.TXT3)
+        if error:
+            self.logline(f"[!] {message}")
 
     def _field_error(self, key, message):
         self._select_tab("extras" if key in ("lat", "lng", "hook") else "basic")
@@ -629,7 +460,7 @@ class App(ctk.CTk):
                 return self._field_error(key, f"{title}须为 {-limit} 到 {limit} 的数字")
             coords[key] = value
             self._entries[key].invalid = False
-            self._entries[key].configure(border_color=INPUT_BORDER)
+            self._entries[key].configure(border_color=design.INPUT_BORDER)
 
         cfg = copy.deepcopy(self.cfg)
         secrets = copy.deepcopy(self.secrets)
@@ -654,8 +485,8 @@ class App(ctk.CTk):
             return False
         self.cfg, self.secrets = cfg, secrets
         self._saved_values = self._field_values()
-        self.b_save.configure(text_color=TXT2)
-        self._feedback("已保存 · 设置将在下次启动时生效" if self._task_kind else "配置已保存")
+        self.b_save.configure(text_color=design.TXT2)
+        self._feedback("已保存 · 下次启动时生效" if self._task_kind else "设置已保存")
         return True
 
     def _theme_color(self, value):
@@ -665,8 +496,8 @@ class App(ctk.CTk):
 
     def _apply_log_colors(self):
         # Tk 文本标签不接受 CTk 的双色元组，切换时同步已有日志。
-        for tag, color in (("time", TXT3), ("info", TXT2), ("success", GREEN),
-                           ("error", RED), ("warn", AMBER), ("asr", TXT)):
+        for tag, color in (("time", design.TXT3), ("info", design.TXT2), ("success", design.GREEN),
+                           ("error", design.RED), ("warn", design.AMBER), ("asr", design.TXT)):
             self.log.tag_config(tag, foreground=self._theme_color(color))
 
     def toggle_theme(self):
@@ -674,7 +505,7 @@ class App(ctk.CTk):
         ctk.set_appearance_mode(self._appearance)
         self.b_theme.configure(
             text="浅色" if self._appearance == "dark" else "深色",
-            image=ui_icon("sun" if self._appearance == "dark" else "moon", 16))
+            image=design.ui_icon("sun" if self._appearance == "dark" else "moon", 16))
         self._apply_log_colors()
         # 单独记住主题，不提交表单中尚未保存的账号或其他修改。
         cfg = copy.deepcopy(self.cfg)
@@ -703,25 +534,26 @@ class App(ctk.CTk):
         if self._busy():
             return False
         self._task_kind = kind
-        self.b_start.configure(state="disabled")
+        self.b_monitor.configure(state="disabled")
         self.b_login.configure(state="disabled")
         self.b_test.configure(state="disabled")
         if kind == "monitor":
             self._t0 = time.monotonic()
             self._metrics["time"].configure(text="00:00:00")
-            self._metrics["code"].configure(text="— — — —", text_color=TXT)
-            self._transcript.configure(text="正在等待课堂声音…", text_color=TXT3)
-            self.b_start.configure(text="正在监控")
-            self.b_start.grid_remove()
-            self.b_stop.configure(state="normal", text="停止监控")
-            self.b_stop.grid()
-            self._set_status(AMBER, "正在启动")
+            self._set_code(None)
+            self._has_transcript = False
+            self._transcript.configure(text="正在准备语音识别…", text_color=design.TXT2)
+            self._transcript_hint.configure(text="初始化本地模型，请稍候。")
+            self.b_monitor.configure(
+                state="normal", text="停止监控",
+                image=design.ui_icon("stop", 15, design.BUTTON_TEXT))
+            self._set_status(design.AMBER, "正在启动")
         elif kind == "login":
             self.b_login.configure(text="登录中…")
-            self._set_status(AMBER, "登录中")
+            self._set_status(design.AMBER, "登录中")
         else:
             self.b_test.configure(text="发送中…")
-            self._set_status(AMBER, "测试通知")
+            self._set_status(design.AMBER, "测试通知")
 
         def run():
             failed = False
@@ -753,22 +585,31 @@ class App(ctk.CTk):
     def _finish_task(self, kind, failed):
         if kind == "monitor":
             self._update_timer()
+            if not self._has_transcript:
+                self._transcript.configure(text="监控未能启动" if failed else "监控已结束")
+            self._transcript_hint.configure(
+                text="请查看下方活动记录，调整后重试。" if failed else "点击「启动监控」开始下一次课堂。")
         self._task_kind = None
         self._t0 = None
         self.worker = None
-        self.b_start.configure(state="normal", text="启动监控")
-        self.b_stop.configure(state="disabled", text="停止监控")
-        self.b_stop.grid_remove()
-        self.b_start.grid()
+        self.b_monitor.configure(
+            state="normal", text="启动监控",
+            image=design.ui_icon("play", 15, design.BUTTON_TEXT))
         self.b_login.configure(state="normal", text="登录 / 刷新")
         self.b_test.configure(state="normal", text="测试推送")
         if failed:
-            self._set_status(RED, "任务异常")
+            self._set_status(design.RED, "任务异常")
         elif kind == "monitor":
-            self._set_status(TXT3, "已停止")
+            self._set_status(design.TXT3, "已停止")
             self.logline("[i] 监控已停止。")
         else:
-            self._set_status(TXT3, "就绪")
+            self._set_status(design.TXT3, "就绪")
+
+    def toggle_monitor(self):
+        if self._task_kind == "monitor":
+            self.stop_monitor()
+        else:
+            self.start_monitor()
 
     def start_monitor(self):
         if self._busy() or not self.save_cfg():
@@ -776,7 +617,7 @@ class App(ctk.CTk):
         self.stop_event.clear()
 
         def run(cfg):
-            from echosign import cli as monitor
+            from echosign import monitor
 
             if not self.stop_event.is_set():
                 monitor.cmd_run(cfg, self.stop_event)
@@ -787,8 +628,8 @@ class App(ctk.CTk):
         if self._task_kind != "monitor" or self.stop_event.is_set():
             return
         self.stop_event.set()
-        self.b_stop.configure(state="disabled", text="停止中")
-        self._set_status(AMBER, "正在停止")
+        self.b_monitor.configure(state="disabled", text="正在停止…")
+        self._set_status(design.AMBER, "正在停止")
         self.logline("[i] 正在停止监控…")
 
     def do_login(self):
@@ -796,9 +637,9 @@ class App(ctk.CTk):
             return
 
         def run():
-            from echosign import browser_login
+            from echosign import browser
 
-            return browser_login.main()
+            return browser.login()
 
         self._worker(run, kind="login")
 
@@ -812,7 +653,7 @@ class App(ctk.CTk):
             return
 
         def run(cfg):
-            from echosign import cli as monitor
+            from echosign import monitor
 
             monitor.cmd_webhook_test(cfg)
 
@@ -844,6 +685,37 @@ class App(ctk.CTk):
         self._tick_job = self.after(1000, self._tick)
 
     # ---------- 日志和实时转写 ----------
+    def _set_code(self, code):
+        if self._copy_job:
+            self.after_cancel(self._copy_job)
+            self._copy_job = None
+        self._code = code
+        self._metrics["code"].configure(
+            text=code or "— — — —", text_color=design.GREEN if code else design.TXT3)
+        self.b_copy.configure(
+            text="复制", state="normal" if code else "disabled",
+            image=design.ui_icon("copy", 14, design.TXT2 if code else design.TXT3))
+
+    def copy_code(self):
+        if not self._code:
+            return False
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(self._code)
+        except TclError:
+            self._feedback("复制失败，请重试", error=True)
+            return False
+        if self._copy_job:
+            self.after_cancel(self._copy_job)
+        self.b_copy.configure(text="已复制", image=design.ui_icon("check", 14))
+
+        def reset_feedback():
+            self._copy_job = None
+            self._set_code(self._code)
+
+        self._copy_job = self.after(1800, reset_feedback)
+        return True
+
     def logline(self, s: str):
         self.log_q.put(s)
 
@@ -852,14 +724,21 @@ class App(ctk.CTk):
         if not line:
             return
         if line.startswith("…识别中:"):
-            self._transcript.configure(text=line.partition(":")[2].strip(), text_color=TXT2)
+            self._has_transcript = True
+            self._transcript_hint.configure(text="")
+            self._transcript.configure(text=line.partition(":")[2].strip(), text_color=design.TXT2)
             return  # 中间识别结果只更新预览，不淹没最终日志。
         if line.startswith("[ASR "):
-            self._transcript.configure(text=line.partition("]")[2].strip(), text_color=TXT)
-        if (code := re.search(r"签到码[:：]\s*(\d{4})(?!\d)", line)):
-            self._metrics["code"].configure(text=code.group(1), text_color=GREEN)
+            self._has_transcript = True
+            self._transcript_hint.configure(text="")
+            self._transcript.configure(text=line.partition("]")[2].strip(), text_color=design.TXT)
+        if (code := re.search(r"签到码[:：]\s*([0-9]{4})(?!\d)", line)):
+            self._set_code(code.group(1))
         if "ASR 就绪" in line and self._task_kind == "monitor" and not self.stop_event.is_set():
-            self._set_status(GREEN, "监控中")
+            self._set_status(design.GREEN, "监控中")
+            if not self._has_transcript:
+                self._transcript.configure(text="等待课堂声音…", text_color=design.TXT2)
+                self._transcript_hint.configure(text="正在接收电脑播放的声音。")
         if line.startswith("[错误]") or "Traceback" in line:
             tag = "error"
         elif line.startswith(("[!]", "[warn]")):
@@ -908,7 +787,7 @@ class App(ctk.CTk):
         self.destroy()
 
     def destroy(self):
-        for job in (self._poll_job, self._tick_job):
+        for job in (self._poll_job, self._tick_job, self._copy_job):
             if job:
                 self.after_cancel(job)
         super().destroy()

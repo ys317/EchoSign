@@ -56,7 +56,7 @@ def check_runtime(report_path: str) -> int:
         import numpy as np
         from fastembed import TextEmbedding
         from playwright.sync_api import sync_playwright
-        from echosign.asr import StreamingASR
+        from echosign.audio import StreamingASR
 
         configure_browser_runtime()
         with tempfile.TemporaryDirectory(prefix="echosign-check-") as temporary:

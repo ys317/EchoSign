@@ -1,9 +1,9 @@
 """Entry point.
 
-  python -m echosign.cli devices        # 列出可用输出设备
-  python -m echosign.cli run            # 启动监控
-  python -m echosign.cli test FILE.wav  # 识别音频文件
-  python -m echosign.cli demo           # 检查规则匹配
+  python -m echosign devices        # 列出可用输出设备
+  python -m echosign run            # 启动监控
+  python -m echosign test FILE.wav  # 识别音频文件
+  python -m echosign demo           # 检查规则匹配
 """
 from __future__ import annotations
 
@@ -15,11 +15,9 @@ import time
 import yaml
 
 from echosign.alert import Alerter
-from echosign.asr import StreamingASR
-from echosign.autosign import make_auto_signer
-from echosign.capture import LoopbackSource, WavFileSource
-from echosign.matcher import build_matchers
-from echosign.watcher import SignInWatcher, extract_codes
+from echosign.attendance import make_auto_signer
+from echosign.audio import LoopbackSource, StreamingASR, WavFileSource
+from echosign.rules import SignInWatcher, build_matchers, extract_codes
 
 
 def load_config(path: str) -> dict:
@@ -180,7 +178,7 @@ def cmd_code() -> None:
         print(f"> {s}\n    归一: {norm}\n    码: {codes or '无'}")
 
 
-def main() -> None:
+def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="echosign")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("devices")
@@ -195,7 +193,7 @@ def main() -> None:
     sub.add_parser("code")
     pwh = sub.add_parser("webhook-test")
     pwh.add_argument("--config", default="config.yaml")
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
     if args.cmd == "devices":
         cmd_devices()
@@ -210,6 +208,4 @@ def main() -> None:
     elif args.cmd == "webhook-test":
         cmd_webhook_test(load_config(args.config))
 
-
-if __name__ == "__main__":
-    main()
+    return 0

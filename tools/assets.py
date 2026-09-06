@@ -1,7 +1,6 @@
-"""Render the real desktop UI with isolated demo data and export lossless PNGs.
+"""Maintain the application icon and lossless desktop screenshots.
 
-Windows only. Does not open a browser, capture audio, sign in or send a webhook.
-Use --preview for an interactive demo, or run without arguments for README images.
+The screenshots command uses isolated demo data, without login, audio or webhooks.
 """
 from __future__ import annotations
 
@@ -12,7 +11,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from PIL import ImageGrab
+from PIL import Image, ImageDraw, ImageGrab
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -91,7 +90,7 @@ def render(app, output, scale, page):
         expected = (round(1180 * scale), round(760 * scale))
         if image.size != expected:
             raise RuntimeError(f"Expected native render {expected}, received {image.size}")
-        for x, color in ((0, ui.CARD), (image.width - 1, ui.BG)):
+        for x, color in ((0, ui.design.CARD), (image.width - 1, ui.design.BG)):
             expected_color = tuple(bytes.fromhex(app._theme_color(color).lstrip("#")))
             if image.getpixel((x, image.height - 1)) != expected_color:
                 raise RuntimeError("Window is clipped by the display; retry with a smaller --scale.")
@@ -101,17 +100,7 @@ def render(app, output, scale, page):
     return paths
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--preview", action="store_true")
-    parser.add_argument("--output", type=Path, default=ROOT / "assets/screenshots")
-    parser.add_argument("--scale", type=float, default=1.5)
-    parser.add_argument("--page", choices=("basic", "rules", "extras"), default="basic")
-    args = parser.parse_args()
-    if sys.platform != "win32":
-        parser.error("The screenshot exporter requires Windows.")
-    if not 1 <= args.scale <= 3:
-        parser.error("--scale must be between 1 and 3.")
+def screenshots(args):
     (ROOT / "build").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ui-demo-", dir=ROOT / "build") as temp:
         prepare_demo(Path(temp))
@@ -130,6 +119,40 @@ def main():
                 app.worker.join(timeout=2)
             app.destroy()
         print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+
+def generate_icon():
+    image = Image.new("RGBA", (256, 256))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((12, 12, 244, 244), radius=56, fill="#252525")
+    for index, height in enumerate((64, 128, 94, 150)):
+        x = 63 + 35 * index
+        draw.rounded_rectangle(
+            (x, 128 - height / 2, x + 20, 128 + height / 2),
+            radius=8, fill="#ffffff")
+    image.save(Path(__file__).resolve().parents[1] / "assets" / "echosign.ico",
+               sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("icon", help="Generate the app's waveform icon")
+    shots = commands.add_parser("screenshots", help="Render the real UI with demo data")
+    shots.add_argument("--preview", action="store_true")
+    shots.add_argument("--output", type=Path, default=ROOT / "assets/screenshots")
+    shots.add_argument("--scale", type=float, default=1.5)
+    shots.add_argument("--page", choices=("basic", "rules", "extras"), default="basic")
+    args = parser.parse_args()
+    if args.command == "icon":
+        generate_icon()
+        return
+    if sys.platform != "win32":
+        parser.error("The screenshot exporter requires Windows.")
+    if not 1 <= args.scale <= 3:
+        parser.error("--scale must be between 1 and 3.")
+    screenshots(args)
 
 
 if __name__ == "__main__":

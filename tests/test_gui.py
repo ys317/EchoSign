@@ -58,6 +58,7 @@ class GuiTests(unittest.TestCase):
         self.app._loading = False
         self.app.txt_rules.edit_modified(False)
         self.app.stop_event.clear()
+        self.app._set_code(None)
         self.app.clear_log()
         for q in (self.app.log_q, self.app.task_q):
             while not q.empty():
@@ -123,12 +124,12 @@ class GuiTests(unittest.TestCase):
         try:
             var.set(True)
             self.pump_until(lambda: switch._position == switch._x(True))
-            self.assertEqual(switch.cget("fg_color"), ui.SW_ON)
+            self.assertEqual(switch.cget("fg_color"), ui.design.SW_ON)
             for _ in range(7):
                 switch.toggle()
             self.pump_until(lambda: switch._position == switch._x(False))
             self.assertFalse(var.get())
-            self.assertEqual(switch.cget("fg_color"), ui.SW_OFF)
+            self.assertEqual(switch.cget("fg_color"), ui.design.SW_OFF)
         finally:
             switch.destroy()
 
@@ -154,6 +155,44 @@ class GuiTests(unittest.TestCase):
         self.assertIn("event-050", lines[0])
         self.app.v_follow.set(True)
 
+    def test_copy_is_available_only_after_a_code_is_detected(self):
+        with patch.object(self.app, "clipboard_clear") as clear, \
+                patch.object(self.app, "clipboard_append") as append:
+            self.assertEqual(self.app.b_copy.cget("state"), "disabled")
+            self.assertFalse(self.app.copy_code())
+            clear.assert_not_called()
+            self.app._append_log("[i] 签到码: 0234")
+            self.assertEqual(self.app.b_copy.cget("state"), "normal")
+            self.assertTrue(self.app.copy_code())
+            clear.assert_called_once()
+            append.assert_called_once_with("0234")
+            self.assertEqual(self.app.b_copy.cget("text"), "已复制")
+            self.app._append_log("[i] 签到码: 5678")
+            self.assertEqual(self.app.b_copy.cget("text"), "复制")
+            self.assertTrue(self.app.copy_code())
+            self.assertEqual(append.call_args.args, ("5678",))
+            self.pump_until(lambda: self.app.b_copy.cget("text") == "复制")
+            self.assertEqual(self.app._code, "5678")
+
+    def test_clearing_activity_keeps_detected_code_and_timer(self):
+        self.app._append_log("[i] 签到码: 1234")
+        self.app._metrics["time"].configure(text="00:12:34")
+        self.app.clear_log()
+        self.assertEqual(self.app._metrics["code"].cget("text"), "1234")
+        self.assertEqual(self.app.b_copy.cget("state"), "normal")
+        self.assertEqual(self.app._metrics["time"].cget("text"), "00:12:34")
+
+    def test_new_monitor_clears_the_previous_code_before_initialization(self):
+        self.app._append_log("[i] 签到码: 1234")
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.app._worker(lambda: release.wait(2), kind="monitor")
+        self.assertIsNone(self.app._code)
+        self.assertEqual(self.app.b_copy.cget("state"), "disabled")
+        self.assertIn("准备语音识别", self.app._transcript.cget("text"))
+        release.set()
+        self.pump_until(lambda: self.app._task_kind is None)
+
     def test_busy_task_does_not_change_monitor_controls(self):
         release = threading.Event()
         self.addCleanup(release.set)
@@ -162,10 +201,10 @@ class GuiTests(unittest.TestCase):
             self.app.start_monitor()
             save.assert_not_called()
         self.assertEqual(self.app._task_kind, "login")
-        self.assertEqual(self.app.b_stop.cget("state"), "disabled")
+        self.assertEqual(self.app.b_monitor.cget("state"), "disabled")
         release.set()
         self.pump_until(lambda: self.app._task_kind is None)
-        self.assertEqual(self.app.b_start.cget("state"), "normal")
+        self.assertEqual(self.app.b_monitor.cget("state"), "normal")
 
     def test_monitor_start_stop_is_driven_by_main_thread(self):
         release = threading.Event()
@@ -178,13 +217,15 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(self.app._worker(monitor, kind="monitor"))
         self.pump_until(lambda: self.app._status.cget("text") == "监控中")
         self.assertEqual(self.app._status.cget("text"), "监控中")
-        self.app.stop_monitor()
+        self.assertEqual(self.app.b_monitor.cget("text"), "停止监控")
+        self.app.b_monitor.invoke()
         self.assertTrue(self.app.stop_event.is_set())
-        self.assertEqual(self.app.b_stop.cget("state"), "disabled")
+        self.assertEqual(self.app.b_monitor.cget("state"), "disabled")
         release.set()
         self.pump_until(lambda: self.app._task_kind is None)
         self.assertEqual(self.app._status.cget("text"), "已停止")
-        self.assertEqual(self.app.b_start.cget("state"), "normal")
+        self.assertEqual(self.app.b_monitor.cget("state"), "normal")
+        self.assertEqual(self.app.b_monitor.cget("text"), "启动监控")
 
     def test_worker_failure_is_visible_and_recovers_controls(self):
         def failing_task():
@@ -193,7 +234,7 @@ class GuiTests(unittest.TestCase):
         self.app._worker(failing_task, kind="monitor")
         self.pump_until(lambda: self.app._task_kind is None)
         self.assertEqual(self.app._status.cget("text"), "任务异常")
-        self.assertEqual(self.app.b_start.cget("state"), "normal")
+        self.assertEqual(self.app.b_monitor.cget("state"), "normal")
         self.assertIn("simulated audio failure", self.app.log.get("1.0", "end"))
 
     def test_dirty_state_and_password_visibility(self):
@@ -217,7 +258,7 @@ class GuiTests(unittest.TestCase):
             self.assertEqual(ui.ctk.get_appearance_mode().lower(), target_theme)
             self.assertEqual(self.app._appearance, target_theme)
             self.assertEqual(self.app.log.tag_cget("error", "foreground"),
-                             self.app._theme_color(ui.RED))
+                             self.app._theme_color(ui.design.RED))
             self.assertIn("sample error", self.app.log.get("1.0", "end"))
             saved = yaml.safe_load(ui.CONFIG.read_text(encoding="utf-8"))
             self.assertEqual(saved["ui"]["appearance"], target_theme)
@@ -234,7 +275,7 @@ class GuiTests(unittest.TestCase):
         try:
             self.assertNotEqual(self.app._appearance, original_theme)
             self.assertIn("偏好保存失败", self.app._save_state.cget("text"))
-            self.assertEqual(self.app.b_start.cget("state"), "normal")
+            self.assertEqual(self.app.b_monitor.cget("state"), "normal")
         finally:
             self.app.toggle_theme()
 

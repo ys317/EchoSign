@@ -1,5 +1,5 @@
 ﻿# ====== 音频采集 ======
-device: null # 输出设备(扬声器)名称关键词, null=系统默认; 用 `python -m echosign.cli devices` 查看列表
+device: null # 输出设备(扬声器)名称关键词, null=系统默认; 用 `python -m echosign devices` 查看列表
 chunk_seconds: 0.25 # 每次送给 ASR 的音频块长度
 
 # ====== ASR 引擎 ======
