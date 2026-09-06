@@ -6,6 +6,21 @@
 
 [下载 v1.2 Windows 版](https://github.com/ys317/EchoSign/releases/tag/v1.2) · [所有 Releases](https://github.com/ys317/EchoSign/releases)
 
+当前源码已修复签到结果误报成功和停止监控后采集线程未退出的问题；这些修复尚未包含在已发布的 v1.2 下载包中。
+
+## 界面预览
+
+以下为真实桌面界面，使用演示账号和模拟转写内容。
+
+![EchoSign 深色主题：课堂设置、实时转写与监控日志](assets/screenshots/dark.png)
+
+<details>
+<summary>查看浅色主题</summary>
+
+![EchoSign 浅色主题：课堂设置、实时转写与监控日志](assets/screenshots/light.png)
+
+</details>
+
 ## 主要功能
 
 - 使用 Windows WASAPI 环回采集系统输出声音，在本机进行流式中文语音识别。
@@ -133,12 +148,13 @@ python -m venv .venv
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pyinstaller==6.22.2 pillow==12.2.0
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_gui.py -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_reliability.py -v
 .\build_exe.ps1
 ```
 
 构建先在 `build/ui-dist/EchoSign` 暂存，再更新 `dist/EchoSign` 中的程序、运行库和说明，保留已有个人配置。更新发行目录前请关闭其中正在运行的程序。需要只生成暂存构建时，使用 `./build_exe.ps1 -StageOnly`。
 
-本地打包脚本不复制语音模型，运行监控前还需放好 `models/`；GitHub Release ZIP 则已包含该模型。GUI 回归测试使用临时配置与模拟任务，不会实际登录、签到或发送远程通知。`tests/` 中其他脚本包含实机调试用途，运行前请先阅读脚本。
+本地打包脚本不复制语音模型，运行监控前还需放好 `models/`；GitHub Release ZIP 则已包含该模型。上述 GUI 与可靠性回归测试使用临时配置、模拟浏览器响应和模拟音频设备，覆盖签到结果判定、停止采集、异常退出及界面交互，不会实际登录、签到或发送远程通知。`tests/` 中其他脚本包含实机调试用途，运行前请先阅读脚本。
 
 核心代码位于 `automonitor/`；`echosign_app.py` 为桌面入口，`main.py` 为命令行入口，`browser_login.py` 和 `browser_sign.py` 负责平台浏览器操作。第三方运行库与模型遵循各自的许可证及使用条件。
 

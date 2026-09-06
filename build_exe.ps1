@@ -25,6 +25,9 @@ try {
     foreach ($supportFile in @('install_browser.bat', 'README.md')) {
         Copy-Item -LiteralPath (Join-Path $projectRoot $supportFile) -Destination (Join-Path $stagedApp $supportFile) -Force
     }
+    $stagedAssets = Join-Path $stagedApp 'assets'
+    New-Item -ItemType Directory -Path $stagedAssets -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\screenshots') -Destination $stagedAssets -Recurse -Force
     if ($StageOnly) {
         Write-Output "Staged: $(Join-Path $stagedApp 'EchoSign.exe')"
         return
@@ -35,6 +38,9 @@ try {
     foreach ($programFile in @('EchoSign.exe', 'install_browser.bat', 'README.md')) {
         Copy-Item -LiteralPath (Join-Path $stagedApp $programFile) -Destination (Join-Path $targetRoot $programFile) -Force
     }
+    $targetAssets = Join-Path $targetRoot 'assets'
+    New-Item -ItemType Directory -Path $targetAssets -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $stagedAssets 'screenshots') -Destination $targetAssets -Recurse -Force
     Write-Output "Built: $(Join-Path $targetRoot 'EchoSign.exe')"
 }
 finally {

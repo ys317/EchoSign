@@ -6,15 +6,17 @@ Usage:
 """
 from __future__ import annotations
 
-import json
+import argparse
 import pathlib
 import sys
 import time
+from urllib.parse import parse_qs, urlparse
 
 import yaml
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from browser_login import ROOT, _cleanup_stale_profile, load_secrets, try_sso_login
+from automonitor.sign_result import SignResult, classify_response
 
 START = "https://skl.hdu.edu.cn/index.html"
 
@@ -69,20 +71,15 @@ def click_visible(page, selector: str, text: str | None = None, timeout_ms: int 
 KEYPAD = "button, .van-button, [role=button]"
 
 
-def sign_with_code(ctx, page, code: str) -> None:
-    result: dict = {}
+def is_sign_response(response, code: str) -> bool:
+    url = urlparse(response.url)
+    return (url.scheme == "https" and url.hostname == "skl.hdu.edu.cn"
+            and url.path.rstrip("/") == "/api/ali-nvc/captcha-verify"
+            and response.request.method == "POST"
+            and parse_qs(url.query).get("code") == [code])
 
-    def on_response(resp):
-        u = resp.url
-        if "captcha-verify" in u or ("sign" in u and "/api/" in u):
-            try:
-                result.setdefault("hits", []).append(
-                    {"status": resp.status, "url": u[:120], "body": resp.text()[:400]})
-            except Exception:  # noqa: BLE001
-                pass
 
-    page.on("response", on_response)
-
+def sign_with_code(ctx, page, code: str) -> SignResult:
     print("[i] 打开 课堂签到 ...")
     click_visible(page, "span, button", "课堂签到", timeout_ms=15000)
     page.wait_for_url("**/sign/in**", timeout=15000)
@@ -99,40 +96,52 @@ def sign_with_code(ctx, page, code: str) -> None:
         ".code-box, .digit, .van-field, input") if el.is_visible()]
     print(f"[i] 码格显示: {boxes}")
 
-    click_visible(page, KEYPAD, "签到", timeout_ms=6000)
-    print("[i] 已点击 签到, 等待接口返回...")
+    # Listen only around this submission. Earlier page loads, login, and unrelated
+    # captcha responses must not become the result of the current sign-in.
+    try:
+        with page.expect_response(lambda response: is_sign_response(response, code),
+                                  timeout=12000) as pending:
+            click_visible(page, KEYPAD, "签到", timeout_ms=6000)
+        response = pending.value
+    except PlaywrightTimeoutError:
+        return SignResult("unknown", code, "未收到本次签到响应，请到平台核对")
+    try:
+        payload = response.json()
+    except (ValueError, PlaywrightTimeoutError):
+        payload = None
+    return classify_response(code, response.status, payload)
 
-    for _ in range(12):
-        if result.get("hits"):
-            for h in result["hits"]:
-                print(f"[结果] HTTP {h['status']} {h['url']}")
-                print(f"[结果] {h['body']}")
-            return
-        page.wait_for_timeout(1000)
-    print("[!] 未捕获到签到接口响应")
-    page.screenshot(path=str(ROOT / "tests" / "shots" / "sign_result.png"))
 
-
-def main() -> int:
-    if len(sys.argv) != 2 or not (len(sys.argv[1]) == 4 and sys.argv[1].isdigit()):
-        print(__doc__)
-        return 2
-    code = sys.argv[1]
-    secrets = load_secrets()
-    _cleanup_stale_profile()
-    with sync_playwright() as pw:
-        ctx = pw.chromium.launch_persistent_context(str(ROOT / "browser_profile"),
-                                                    headless=False)
-        lat, lng = _location()
-        ctx.grant_permissions(["geolocation"],
-                              origin="https://skl.hdu.edu.cn")
-        ctx.set_geolocation({"latitude": lat, "longitude": lng, "accuracy": 30})
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        token = ensure_logged_in(page, secrets)
-        print(f"[i] 登录态 OK ({token[:6]}...)")
-        sign_with_code(ctx, page, code)
-        ctx.close()
-    return 0
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="在本人已授权的课堂中提交四位签到码")
+    parser.add_argument("code")
+    parser.add_argument("--result-file", type=pathlib.Path)
+    args = parser.parse_args(argv)
+    code = args.code
+    if len(code) != 4 or not code.isascii() or not code.isdigit():
+        parser.error("签到码必须是四位数字")
+    try:
+        secrets = load_secrets()
+        _cleanup_stale_profile()
+        with sync_playwright() as pw:
+            ctx = pw.chromium.launch_persistent_context(str(ROOT / "browser_profile"),
+                                                        headless=False)
+            try:
+                lat, lng = _location()
+                ctx.grant_permissions(["geolocation"], origin="https://skl.hdu.edu.cn")
+                ctx.set_geolocation({"latitude": lat, "longitude": lng, "accuracy": 30})
+                page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                ensure_logged_in(page, secrets)
+                print("[i] 登录态已确认")
+                result = sign_with_code(ctx, page, code)
+            finally:
+                ctx.close()
+    except Exception as exc:  # A browser error cannot establish a sign-in outcome.
+        result = SignResult("unknown", code, f"浏览器操作异常：{exc}")
+    print(f"[结果] {result.status}: {result.message}")
+    if args.result_file:
+        result.write(args.result_file)
+    return result.exit_code
 
 
 if __name__ == "__main__":

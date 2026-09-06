@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import sys
 import time
 
@@ -91,6 +92,8 @@ def run_pipeline(chunks, asr, matchers, alerter, watcher: SignInWatcher | None =
             print("\n[i] 收到停止信号")
             break
         finals, partial = asr.accept(chunk)
+        if stop is not None and stop.is_set():
+            break
         for text in finals:
             handle(text)
         if partial and watcher and watcher.active:
@@ -100,8 +103,10 @@ def run_pipeline(chunks, asr, matchers, alerter, watcher: SignInWatcher | None =
             line = f"…识别中: {partial}"
             sys.stdout.write("\r" + line.ljust(78)[:78])
             sys.stdout.flush()
-    for text in asr.flush():
-        handle(text)
+    remaining = asr.flush()
+    if stop is None or not stop.is_set():
+        for text in remaining:
+            handle(text)
     print(f"\n结束, 共处理音频 {time.time() - t0:.1f}s(墙钟)")
 
 
@@ -116,7 +121,8 @@ def cmd_run(cfg: dict, stop=None) -> None:
     asr = make_engine(cfg)
     print("[i] ASR 就绪, Ctrl+C 停止\n")
     try:
-        run_pipeline(src.chunks(), asr, matchers, alerter, watcher, stop=stop)
+        with closing(src.chunks(stop=stop)) as chunks:
+            run_pipeline(chunks, asr, matchers, alerter, watcher, stop=stop)
     except KeyboardInterrupt:
         print("\n已停止")
 

@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
+
+from automonitor.sign_result import SignResult
 
 ROOT = Path(__file__).resolve().parents[1]
 PY = ROOT / ".venv" / "Scripts" / "python.exe"
@@ -43,23 +46,34 @@ class AutoSigner:
             cmd = [sys.executable, "--sign", code]  # 打包后自调用
         else:
             cmd = [str(PY), "-X", "utf8", str(ROOT / "browser_sign.py"), code]
+        result = SignResult("unknown", code, "浏览器未返回明确的签到结果，请到平台核对")
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True,
-                                  encoding="utf-8", errors="replace",
-                                  timeout=self.timeout_s, cwd=str(ROOT))
-            out = (proc.stdout or "") + (proc.stderr or "")
-        except Exception as e:  # noqa: BLE001
-            out = f"启动失败: {e}"
+            # Windowed executables may not expose stdout. Use a private result file
+            # for both frozen and source runs; logs never determine success.
+            with tempfile.TemporaryDirectory(prefix="echosign-result-") as temporary:
+                result_path = Path(temporary) / "result.json"
+                proc = subprocess.run(
+                    [*cmd, "--result-file", str(result_path)],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=self.timeout_s, cwd=str(ROOT),
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                out = (proc.stdout or "") + (proc.stderr or "")
+                print("\n".join(line for line in out.splitlines() if line.strip())[-1200:])
+                if result_path.exists():
+                    result = SignResult.read(result_path, code)
+                if result.status == "success" and proc.returncode != 0:
+                    result = SignResult("unknown", code, "浏览器异常退出，签到结果需到平台核对")
+        except subprocess.TimeoutExpired:
+            result = SignResult("unknown", code, "浏览器处理超时，签到结果需到平台核对")
+        except (OSError, ValueError) as exc:
+            result = SignResult("unknown", code, f"无法确认签到结果：{exc}")
 
-        tail = "\n".join([ln for ln in out.splitlines() if ln.strip()][-6:])
-        print(tail)
-
-        if "成功" in out or '"code":200' in out:
+        if result.status == "success":
             self.notify(f"自动签到成功, 码 {code}", f"✅ 已自动完成签到 (码 {code})")
-        elif "不存在" in out or "过期" in out or "错误" in out:
-            self.notify(f"自动签到失败, 码 {code}", f"❌ 码无效/过期: {code}\n{tail[-200:]}")
+        elif result.status == "failure":
+            self.notify(f"自动签到失败, 码 {code}", f"❌ 签到失败 (码 {code})\n{result.message}")
         else:
-            self.notify(f"自动签到结果未知, 码 {code}", f"⚠️ 请人工确认: {tail[-300:]}")
+            self.notify(f"自动签到结果未知, 码 {code}", f"⚠️ 请人工确认: {result.message}")
 
 
 def make_auto_signer(cfg: dict, alerter):

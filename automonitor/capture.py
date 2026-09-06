@@ -61,31 +61,64 @@ class LoopbackSource:
         self._mic = sc.get_microphone(speaker.name, include_loopback=True)
         self.chunk_frames = int(self.RECORD_RATE * chunk_seconds)
 
-    def chunks(self) -> Iterator[np.ndarray]:
+    def chunks(self, stop: threading.Event | None = None) -> Iterator[np.ndarray]:
         """Capture in a dedicated thread so ASR decode time never stalls the
         recorder (stalls cause WASAPI buffer gaps / 'data discontinuity').
         If ASR falls behind, oldest chunks are dropped to keep latency bounded."""
         buf: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=40)  # ~10s @0.25s
-        dropped = [0]
+        shutdown = threading.Event()
+        finished = threading.Event()
+        errors: queue.Queue[Exception] = queue.Queue(maxsize=1)
+
+        def stopping():
+            return shutdown.is_set() or (stop is not None and stop.is_set())
+
+        if stopping():
+            return
 
         def _worker():
-            with self._mic.recorder(samplerate=self.RECORD_RATE, channels=1) as rec:
-                while True:
-                    block = rec.record(numframes=self.chunk_frames)  # float32 (frames, 1)
-                    mono = block.mean(axis=1) if block.ndim > 1 else block
-                    data = resample_to_16k(mono, self.RECORD_RATE)
-                    if buf.full():
+            try:
+                with self._mic.recorder(samplerate=self.RECORD_RATE, channels=1) as rec:
+                    while not stopping():
+                        block = rec.record(numframes=self.chunk_frames)
+                        if stopping():
+                            break
+                        mono = block.mean(axis=1) if block.ndim > 1 else block
+                        data = resample_to_16k(mono, self.RECORD_RATE)
                         try:
-                            buf.get_nowait()
-                            dropped[0] += 1
-                        except queue.Empty:
-                            pass
-                    buf.put(data)
+                            buf.put_nowait(data)
+                        except queue.Full:
+                            try:
+                                buf.get_nowait()
+                            except queue.Empty:
+                                pass
+                            buf.put_nowait(data)
+            except Exception as exc:
+                errors.put_nowait(exc)
+            finally:
+                finished.set()
 
-        threading.Thread(target=_worker, daemon=True).start()
-
-        while True:
-            yield buf.get()
+        worker = threading.Thread(target=_worker, name="EchoSign audio capture", daemon=True)
+        worker.start()
+        try:
+            while not stopping():
+                if finished.is_set():
+                    if not errors.empty():
+                        exc = errors.get_nowait()
+                        raise RuntimeError(f"音频采集失败：{exc}") from exc
+                    if buf.empty():
+                        break
+                try:
+                    data = buf.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if not stopping():
+                    yield data
+        finally:
+            shutdown.set()
+            worker.join(timeout=max(2.0, 3 * self.chunk_frames / self.RECORD_RATE))
+            if worker.is_alive():
+                raise RuntimeError("音频设备未响应停止，请关闭程序后检查输出设备")
 
 
 class WavFileSource:

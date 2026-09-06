@@ -27,7 +27,7 @@ os.chdir(APP_ROOT)
 
 # AutoSigner 在打包环境中通过同一个 exe 启动浏览器签到。
 if len(sys.argv) >= 3 and sys.argv[1] == "--sign":
-    sys.argv = ["browser_sign.py", sys.argv[2]]
+    sys.argv = ["browser_sign.py", *sys.argv[2:]]
     import browser_sign
 
     sys.exit(browser_sign.main())
