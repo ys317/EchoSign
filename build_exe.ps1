@@ -22,7 +22,7 @@ try {
     }
 
     $stagedApp = Join-Path $stageRoot 'EchoSign'
-    foreach ($supportFile in @('install_browser.bat', 'README.md')) {
+    foreach ($supportFile in @('install_browser.bat', 'README.md', 'LICENSE')) {
         Copy-Item -LiteralPath (Join-Path $projectRoot $supportFile) -Destination (Join-Path $stagedApp $supportFile) -Force
     }
     $stagedAssets = Join-Path $stagedApp 'assets'
@@ -35,7 +35,7 @@ try {
     New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
     # Merge runtime files; config.yaml, credentials, profiles and models stay in place.
     Copy-Item -LiteralPath (Join-Path $stagedApp '_internal') -Destination $targetRoot -Recurse -Force
-    foreach ($programFile in @('EchoSign.exe', 'install_browser.bat', 'README.md')) {
+    foreach ($programFile in @('EchoSign.exe', 'install_browser.bat', 'README.md', 'LICENSE')) {
         Copy-Item -LiteralPath (Join-Path $stagedApp $programFile) -Destination (Join-Path $targetRoot $programFile) -Force
     }
     $targetAssets = Join-Path $targetRoot 'assets'

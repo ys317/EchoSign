@@ -4,13 +4,13 @@
 
 这是个人维护的非官方项目，与杭州电子科技大学及「上课啦」平台不存在官方隶属或合作关系。使用前请阅读下方[免责声明](#免责声明)。
 
-[下载 v1.2 Windows 版](https://github.com/ys317/EchoSign/releases/tag/v1.2) · [所有 Releases](https://github.com/ys317/EchoSign/releases)
+[下载 v1.3 Windows 版](https://github.com/ys317/EchoSign/releases/tag/v1.3) · [所有 Releases](https://github.com/ys317/EchoSign/releases) · [MIT License](LICENSE)
 
-当前源码已修复签到结果误报成功和停止监控后采集线程未退出的问题；这些修复尚未包含在已发布的 v1.2 下载包中。
+v1.3 更新了桌面界面与中文字体，并修复签到结果误报成功、停止监控后采集线程未退出的问题。
 
-## 界面预览
+## 界面截图
 
-以下为真实桌面界面，使用演示账号和模拟转写内容。
+以下为 v1.3 的真实桌面界面，使用演示账号和模拟转写内容。
 
 ![EchoSign 深色主题：课堂设置、实时转写与监控日志](assets/screenshots/dark.png)
 
@@ -27,7 +27,7 @@
 - 通过关键词、正则、组合词和可选的语义匹配识别签到提示。
 - 提取四位签到码，支持「一二三四」「幺二三四」等中文数字。
 - 可选企业微信机器人通知，以及面向杭电「上课啦」的浏览器登录和签到操作。
-- 双栏桌面界面：分类设置、实时转写、监控状态和日志；支持深浅色切换并记住选择。
+- 双栏桌面界面：简洁侧栏、大字转写、监控状态和活动记录；支持深浅色切换并记住选择，使用 Windows 系统字体。
 
 语音识别和规则匹配可以本地运行；登录、签到、企业微信推送及首次下载浏览器或语义模型需要网络。其他学校或平台的登录与签到流程不在当前适配范围内。
 
@@ -35,7 +35,7 @@
 
 ### 1. 下载并完整解压
 
-适用于 **Windows 10 / 11 x64**。从 [v1.2 Release](https://github.com/ys317/EchoSign/releases/tag/v1.2) 的 **Assets** 下载 `EchoSign-v1.2-win64.zip`。GitHub 自动生成的 `Source code` 压缩包是源码，不包含可直接使用的 exe。
+适用于 **Windows 10 / 11 x64**。从 [v1.3 Release](https://github.com/ys317/EchoSign/releases/tag/v1.3) 的 **Assets** 下载 `EchoSign-v1.3-win64.zip`。GitHub 自动生成的 `Source code` 压缩包是源码，不包含可直接使用的 exe。
 
 将 ZIP 完整解压到当前用户可写的目录，例如 `D:\Apps\EchoSign`。不要在压缩软件内直接运行，也不要只复制 exe。发行包包含 Python 运行环境和中文语音模型，**不需要另外安装 Python**。
 
@@ -44,11 +44,13 @@ EchoSign/
 ├── EchoSign.exe
 ├── _internal/            程序运行库，必须与 exe 放在一起
 ├── models/               已附带的中文语音识别模型
+├── assets/screenshots/   深浅色界面截图
 ├── install_browser.bat   首次安装浏览器组件
+├── LICENSE               MIT 许可证
 └── README.md             使用说明
 ```
 
-Release 同时提供 `SHA256SUMS.txt`。可在 PowerShell 中运行 `Get-FileHash .\EchoSign-v1.2-win64.zip -Algorithm SHA256`，与校验文件中的值比较。
+Release 同时提供 `SHA256SUMS.txt`。可在 PowerShell 中运行 `Get-FileHash .\EchoSign-v1.3-win64.zip -Algorithm SHA256`，与校验文件中的值比较。
 
 ### 2. 首次安装浏览器组件
 
@@ -156,7 +158,11 @@ python -m venv .venv
 
 本地打包脚本不复制语音模型，运行监控前还需放好 `models/`；GitHub Release ZIP 则已包含该模型。上述 GUI 与可靠性回归测试使用临时配置、模拟浏览器响应和模拟音频设备，覆盖签到结果判定、停止采集、异常退出及界面交互，不会实际登录、签到或发送远程通知。`tests/` 中其他脚本包含实机调试用途，运行前请先阅读脚本。
 
-核心代码位于 `automonitor/`；`echosign_app.py` 为桌面入口，`main.py` 为命令行入口，`browser_login.py` 和 `browser_sign.py` 负责平台浏览器操作。第三方运行库与模型遵循各自的许可证及使用条件。
+核心代码位于 `automonitor/`；`echosign_app.py` 为桌面入口，`main.py` 为命令行入口，`browser_login.py` 和 `browser_sign.py` 负责平台浏览器操作。
+
+## 许可证
+
+本项目原创代码采用 [MIT License](LICENSE)，允许使用、修改和分发（包括商业用途），需保留版权声明和许可证文本。第三方运行库与模型遵循各自的许可证及使用条件。
 
 ## 免责声明
 

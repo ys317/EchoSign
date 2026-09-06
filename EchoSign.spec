@@ -42,6 +42,7 @@ exe = EXE(
     exclude_binaries=True,
     name='EchoSign',
     icon='assets/echosign.ico',
+    version='assets/windows_version.txt',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -1,4 +1,4 @@
-# Runtime versions used for the Windows v1.2 build (Python 3.13).
+# Runtime versions used for the Windows v1.3 build (Python 3.13).
 customtkinter==6.0.0
 PyYAML==6.0.3
 numpy==2.4.6

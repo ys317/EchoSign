@@ -17,6 +17,7 @@ import time
 import webbrowser
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from tkinter import font as tkfont
 from urllib.parse import urlparse
 
 if getattr(sys, "frozen", False):
@@ -39,39 +40,56 @@ CONFIG = APP_ROOT / "config.yaml"
 SECRETS = APP_ROOT / "secrets_local.json"
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", APP_ROOT))
 
-APP_VERSION = "v1.2"
+APP_VERSION = "v1.3"
 F = "Microsoft YaHei UI"
-FM = "Cascadia Code"
+FL = "Segoe UI Semibold"
+FM = "Cascadia Mono"
 
-# (浅色, 深色)：沿用 Hermes 软件的中性色层次，蓝色只用于交互强调。
-BG = ("#f3f4f6", "#171a1e")
-CARD = ("#fcfcfd", "#202429")
-SURFACE = ("#eaedf2", "#2a3037")
-RAIL = ("#dde2e8", "#343b44")
-INPUT_BG = ("#f6f7f9", "#1a1e23")
-INPUT_BORDER = ("#cdd4dd", "#414b57")
-FOCUS = ("#5279bb", "#7597ce")
-TXT = ("#252d39", "#e5e9ef")
-TXT2 = ("#5d6978", "#b3bdca")
-TXT3 = ("#707c8c", "#8996a7")
-GREEN = ("#287254", "#91c6a6")
-AMBER = ("#96661f", "#d2b47b")
-RED = ("#b44b58", "#db939d")
-PRIMARY = ("#426fba", "#456eb8")
-PRIMARY_HOVER = ("#355fa6", "#3c61a5")
-BUTTON_TEXT = "#ffffff"
-GHOST_HOVER = ("#e5eaf1", "#303842")
-TAB_SELECTED = ("#e3ebf9", "#2c3c54")
+# (浅色, 深色)：中性侧栏、低对比边界与黑白主操作，参考 Codex 桌面界面。
+# 明确选择中文无衬线字体，避免 Segoe UI 的中文回退变成细宋体。
+BG = ("#fafaf9", "#212121")
+CARD = ("#f1f1ef", "#181818")
+SURFACE = ("#efefed", "#292929")
+RAIL = ("#e2e2df", "#333333")
+INPUT_BG = ("#fafaf9", "#202020")
+INPUT_BORDER = ("#d7d7d3", "#3a3a3a")
+FOCUS = ("#858580", "#8d8d89")
+TXT = ("#252523", "#ededeb")
+TXT2 = ("#555550", "#c6c6c1")
+TXT3 = ("#73736d", "#a3a39d")
+GREEN = ("#317450", "#97c4a4")
+AMBER = ("#956824", "#d2b47b")
+RED = ("#ae4650", "#dc959c")
+PRIMARY = ("#252523", "#e8e8e4")
+PRIMARY_HOVER = ("#41413c", "#ffffff")
+BUTTON_TEXT = ("#fafaf9", "#252523")
+BUTTON_DISABLED = ("#b6b6b1", "#777772")
+GHOST_HOVER = ("#e5e5e1", "#30302e")
+TAB_SELECTED = ("#fafaf9", "#41413d")
 SW_ON = PRIMARY
-SW_OFF = ("#bdc7d4", "#4b5868")
-KNOB_ON = "#ffffff"
-KNOB_OFF = ("#ffffff", "#d9e0e8")
-RADIUS = 8
+SW_OFF = ("#c7c7c2", "#484844")
+KNOB_ON = BUTTON_TEXT
+KNOB_OFF = ("#ffffff", "#d5d5cf")
+RADIUS = 10
 
-BTN_FONT = (F, 12)
-FIELD_FONT = (F, 13)
-LABEL_FONT = (F, 12)
+BTN_FONT = (F, 13, "bold")
+FIELD_FONT = (FL, 15)
+LABEL_FONT = (F, 13)
 MAX_LOG_LINES = 1500
+
+
+def configure_ui_fonts(root) -> None:
+    """Prefer installed medium-weight CJK faces with explicit Windows fallbacks."""
+    global F, FL, FM, BTN_FONT, FIELD_FONT
+    families = set(tkfont.families(root))
+    F = next((name for name in ("Noto Sans SC Medium", "Microsoft YaHei UI",
+                               "Microsoft JhengHei UI") if name in families),
+             "Microsoft YaHei UI")
+    FL = next((name for name in ("Segoe UI Variable Text Semibold", "Segoe UI Semibold",
+                                "Segoe UI") if name in families), "Segoe UI")
+    FM = "Cascadia Mono" if "Cascadia Mono" in families else "Consolas"
+    BTN_FONT = (F, 13, "bold")
+    FIELD_FONT = (FL, 15)
 
 
 def load_cfg() -> dict:
@@ -179,7 +197,7 @@ class Entry(ctk.CTkEntry):
         kw.setdefault("border_width", 1)
         kw.setdefault("corner_radius", RADIUS)
         kw.setdefault("text_color", TXT)
-        kw.setdefault("height", 40)
+        kw.setdefault("height", 42)
         kw.setdefault("font", FIELD_FONT)
         super().__init__(master, **kw)
         self.invalid = False
@@ -203,6 +221,7 @@ class Entry(ctk.CTkEntry):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+        configure_ui_fonts(self)
         self.cfg = load_cfg()
         self._appearance = (self.cfg.get("ui") or {}).get("appearance", "dark")
         if self._appearance not in ("light", "dark"):
@@ -213,8 +232,8 @@ class App(ctk.CTk):
         icon = RESOURCE_ROOT / "assets" / "echosign.ico"
         if icon.exists():
             self.iconbitmap(str(icon))
-        self.geometry("1100x700")
-        self.minsize(940, 560)
+        self.geometry("1180x760")
+        self.minsize(960, 600)
 
         self.secrets = load_secrets()
         self.log_q: queue.Queue = queue.Queue()
@@ -255,11 +274,13 @@ class App(ctk.CTk):
         self._tick_job = self.after(1000, self._tick)
 
     @staticmethod
-    def _label(parent, text, size=12, color=TXT2, bold=False, family=F, **kw):
+    def _label(parent, text, size=12, color=TXT2, bold=False, family=None, **kw):
         kw.setdefault("height", 0)
+        kw.setdefault("anchor", "w")
+        family = family or F
         return ctk.CTkLabel(
             parent, text=text, font=(family, size, "bold") if bold else (family, size),
-            text_color=color, anchor="w", **kw)
+            text_color=color, **kw)
 
     @staticmethod
     def _divider(parent, pady=16):
@@ -280,65 +301,66 @@ class App(ctk.CTk):
 
     def _body(self):
         body = ctk.CTkFrame(self, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=24, pady=24)
-        body.grid_columnconfigure(0, weight=0, minsize=400)
-        body.grid_columnconfigure(1, weight=1, minsize=440)
+        body.pack(fill="both", expand=True)
+        body.grid_columnconfigure(0, weight=0)
+        body.grid_columnconfigure(1, weight=1)
         body.grid_rowconfigure(0, weight=1)
         self._settings(body)
         self._monitor_panel(body)
 
     def _settings(self, body):
-        card = ctk.CTkFrame(body, fg_color=CARD, corner_radius=RADIUS,
-                            border_color=RAIL, border_width=1)
-        card.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+        card = ctk.CTkFrame(body, width=340, fg_color=CARD, corner_radius=0)
+        card.grid(row=0, column=0, sticky="nsew")
+        card.grid_propagate(False)
+        card.pack_propagate(False)
         header = ctk.CTkFrame(card, fg_color="transparent")
-        header.pack(fill="x", padx=20, pady=(16, 10))
-        self._label(header, "设置", 15, TXT, True).pack(side="left")
+        header.pack(fill="x", padx=24, pady=(24, 18))
+        self._label(header, "设置", 16, TXT, True).pack(side="left")
         self.b_save = self._button(
             header, "保存", self.save_cfg, width=52, height=30)
         self.b_save.pack(side="right")
 
         tabbar = ctk.CTkFrame(card, fg_color=SURFACE, corner_radius=RADIUS)
-        tabbar.pack(fill="x", padx=20, pady=(0, 14))
+        tabbar.pack(fill="x", padx=20, pady=(0, 22))
         tabbar.grid_columnconfigure((0, 1, 2), weight=1, uniform="tabs")
         for i, (key, title) in enumerate((
                 ("basic", "直播与账号"), ("rules", "识别设置"),
                 ("extras", "通知与定位"))):
             tab = self._button(
                 tabbar, title, lambda k=key: self._select_tab(k),
-                width=0, height=32, font=(F, 11))
+                width=0, height=34, font=(F, 12), corner_radius=8)
             tab.grid(row=0, column=i, sticky="ew", padx=3, pady=3)
             self._tabs[key] = tab
 
         # 底部操作独立于滚动内容，小窗口中也始终可见。
         actions = ctk.CTkFrame(card, fg_color="transparent")
-        actions.pack(side="bottom", fill="x", padx=20, pady=(0, 16))
-        self._divider(actions, pady=(8, 10))
+        actions.pack(side="bottom", fill="x", padx=24, pady=(0, 24))
+        self._divider(actions, pady=(12, 12))
         self._save_state = self._label(
-            actions, "", 11, TXT3, height=18)
+            actions, "", 12, TXT3, height=18)
         self._save_state.pack(fill="x", pady=(0, 8))
         row = ctk.CTkFrame(actions, fg_color="transparent")
         row.pack(fill="x")
         row.grid_columnconfigure(0, weight=1)
         self.b_start = self._button(
-            row, "启动监控", self.start_monitor, height=42,
+            row, "启动监控", self.start_monitor, height=44, corner_radius=14,
             fg_color=PRIMARY, hover_color=PRIMARY_HOVER,
-            text_color=BUTTON_TEXT, text_color_disabled="#a5b1c5",
-            font=(F, 13, "bold"))
+            text_color=BUTTON_TEXT, text_color_disabled=BUTTON_DISABLED,
+            font=(F, 14, "bold"))
         self.b_start.grid(row=0, column=0, sticky="ew")
         self.b_stop = self._button(
-            row, "停止", self.stop_monitor, width=76, height=42,
-            border_color=INPUT_BORDER, border_width=1, state="disabled")
+            row, "停止", self.stop_monitor, width=70, height=44,
+            corner_radius=14, border_width=1, border_color=RAIL, state="disabled")
         self.b_stop.grid(row=0, column=1, padx=(10, 0))
 
         content = ctk.CTkFrame(card, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=(14, 10))
+        content.pack(fill="both", expand=True, padx=(18, 12))
         content.grid_rowconfigure(0, weight=1)
         content.grid_columnconfigure(0, weight=1)
         for key in self._tabs:
             page = ctk.CTkScrollableFrame(
                 content, fg_color=CARD, corner_radius=0,
-                scrollbar_button_color=RAIL,
+                scrollbar_fg_color=CARD, scrollbar_button_color=CARD,
                 scrollbar_button_hover_color=INPUT_BORDER)
             page.grid(row=0, column=0, sticky="nsew")
             self._pages[key] = page
@@ -350,15 +372,15 @@ class App(ctk.CTk):
 
     def _field(self, parent, key, title, var, show="", action=None):
         box = ctk.CTkFrame(parent, fg_color="transparent")
-        box.pack(fill="x", pady=(0, 12))
+        box.pack(fill="x", pady=(0, 16))
         caption = ctk.CTkFrame(box, fg_color="transparent", height=22)
-        caption.pack(fill="x", pady=(0, 5))
+        caption.pack(fill="x", pady=(0, 7))
         caption.pack_propagate(False)
-        self._label(caption, title, 12, TXT2).pack(side="left")
+        self._label(caption, title, 13, TXT2).pack(side="left")
         if action:
             button = self._button(
                 caption, action[0], action[1], width=60, height=22,
-                font=(F, 11), text_color=TXT2)
+                font=(F, 12), text_color=TXT2)
             button.pack(side="right")
             self._field_actions[key] = button
         entry = Entry(box, textvariable=var, show=show)
@@ -369,7 +391,7 @@ class App(ctk.CTk):
     def _basic_page(self, page):
         self._field(page, "url", "直播网址", self.v_url,
                     action=("打开 ↗", self.open_url))
-        self._divider(page, 10)
+        self._divider(page, 8)
         row = ctk.CTkFrame(page, fg_color="transparent")
         row.pack(fill="x")
         row.grid_columnconfigure((0, 1), weight=1, uniform="account")
@@ -383,7 +405,7 @@ class App(ctk.CTk):
             action=("显示密码", self._toggle_password))
         self.b_pwd = self._field_actions["pwd"]
         self.b_login = self._button(
-            page, "登录 / 刷新", self.do_login, width=116, height=32,
+            page, "登录 / 刷新", self.do_login, width=116, height=34,
             border_color=INPUT_BORDER, border_width=1)
         self.b_login.pack(anchor="w")
         self._divider(page, 18)
@@ -391,13 +413,13 @@ class App(ctk.CTk):
             page, "自动签到", "识别到签到码后自动提交", self.v_auto)
 
     def _rules_page(self, page):
-        self._label(page, "签到关键词", 13, TXT, True).pack(anchor="w")
-        self._label(page, "每行一项，支持 re: 正则表达式。", 11, TXT3).pack(
+        self._label(page, "签到关键词", 14, TXT, True).pack(anchor="w")
+        self._label(page, "每行一项，支持 re: 正则表达式。", 12, TXT3).pack(
             anchor="w", pady=(2, 10))
         self.txt_rules = ctk.CTkTextbox(
-            page, height=185, font=FIELD_FONT, fg_color=INPUT_BG,
+            page, height=185, font=(F, 14), fg_color=INPUT_BG,
             text_color=TXT, border_color=INPUT_BORDER, border_width=1,
-            corner_radius=RADIUS, wrap="word", spacing1=3, spacing3=3)
+            corner_radius=RADIUS, wrap="word", spacing1=4, spacing3=4)
         self.txt_rules.pack(fill="x")
         self.txt_rules.bind("<FocusIn>", lambda _: self.txt_rules.configure(
             border_color=FOCUS), add="+")
@@ -415,7 +437,7 @@ class App(ctk.CTk):
             show="•", action=("测试推送", self.test_webhook))
         self.b_test = self._field_actions["hook"]
         self._divider(page, 18)
-        self._label(page, "签到位置", 12, TXT2).pack(anchor="w", pady=(0, 8))
+        self._label(page, "签到位置", 13, TXT2).pack(anchor="w", pady=(0, 8))
         row = ctk.CTkFrame(page, fg_color="transparent")
         row.pack(fill="x")
         row.grid_columnconfigure((0, 1), weight=1, uniform="location")
@@ -432,8 +454,8 @@ class App(ctk.CTk):
         track.pack(side="right", padx=(14, 2))
         text = ctk.CTkFrame(row, fg_color="transparent")
         text.pack(side="left", fill="x", expand=True)
-        self._label(text, title, 13, TXT, True).pack(anchor="w")
-        description = self._label(text, desc, 11, TXT3, justify="left", wraplength=260)
+        self._label(text, title, 14, TXT, True).pack(anchor="w")
+        description = self._label(text, desc, 12, TXT3, justify="left", wraplength=260)
         description.pack(fill="x", pady=(3, 0))
         text.bind("<Configure>", lambda e: description.configure(
             wraplength=max(120, int(e.width / description._get_widget_scaling()) - 4)), add="+")
@@ -451,77 +473,81 @@ class App(ctk.CTk):
             self._tabs[name].configure(
                 fg_color=TAB_SELECTED if name == key else "transparent",
                 hover_color=TAB_SELECTED if name == key else GHOST_HOVER,
-                text_color=PRIMARY if name == key else TXT2)
+                text_color=TXT if name == key else TXT2,
+                font=(F, 12, "bold") if name == key else (F, 12))
 
 
     def _monitor_panel(self, body):
-        panel = ctk.CTkFrame(
-            body, fg_color=CARD, corner_radius=RADIUS,
-            border_color=RAIL, border_width=1)
+        panel = ctk.CTkFrame(body, fg_color=BG, corner_radius=0)
         panel.grid(row=0, column=1, sticky="nsew")
 
         header = ctk.CTkFrame(panel, fg_color="transparent")
-        header.pack(fill="x", padx=20, pady=(16, 12))
-        self._label(header, "实时监控", 15, TXT, True).pack(side="left")
-        self._dot = self._label(header, "●", 9, TXT3)
-        self._dot.pack(side="left", padx=(14, 5))
-        self._status = self._label(header, "就绪", 11, TXT3)
-        self._status.pack(side="left")
+        header.pack(fill="x", padx=36, pady=(24, 26))
+        self._label(header, "实时监控", 16, TXT, True).pack(side="left")
+        status = ctk.CTkFrame(header, fg_color=SURFACE, corner_radius=14)
+        status.pack(side="left", padx=(14, 0))
+        self._dot = self._label(status, "●", 8, TXT3)
+        self._dot.pack(side="left", padx=(10, 5), pady=6)
+        self._status = self._label(status, "就绪", 12, TXT3)
+        self._status.pack(side="left", padx=(0, 10), pady=6)
         self.b_theme = self._button(
-            header, "切换浅色" if self._appearance == "dark" else "切换深色",
-            self.toggle_theme, width=76, height=30, font=(F, 11))
+            header, "浅色" if self._appearance == "dark" else "深色",
+            self.toggle_theme, width=58, height=30, font=(F, 12, "bold"),
+            fg_color=SURFACE, corner_radius=15)
         self.b_theme.pack(side="right")
 
         meta = ctk.CTkFrame(panel, fg_color="transparent")
-        meta.pack(fill="x", padx=20, pady=(0, 18))
+        meta.pack(fill="x", padx=38, pady=(0, 28))
         self._metrics = {}
         for key, title, value, side in (
                 ("time", "运行", "00:00:00", "left"),
                 ("code", "签到码", "— — — —", "right")):
             cell = ctk.CTkFrame(meta, fg_color="transparent")
             cell.pack(side=side)
-            self._label(cell, title, 11, TXT3).pack(side="left", padx=(0, 8))
+            self._label(cell, title, 12, TXT3).pack(side="left", padx=(0, 10))
             number = ctk.CTkLabel(
-                cell, text=value, height=22, font=(FM, 14), text_color=TXT2)
+                cell, text=value, height=24,
+                font=(FM, 16 if key == "code" else 13), text_color=TXT2)
             number.pack(side="left")
             self._metrics[key] = number
 
         # 固定转写区高度，让长句也不会挤占日志和操作区域。
-        transcript = ctk.CTkFrame(panel, fg_color="transparent", height=84)
-        transcript.pack(fill="x", padx=20)
+        transcript = ctk.CTkFrame(panel, fg_color="transparent", height=140)
+        transcript.pack(fill="x", padx=38)
         transcript.pack_propagate(False)
-        self._label(transcript, "实时转写", 11, TXT3).pack(anchor="w", pady=(0, 6))
+        self._label(transcript, "实时转写", 12, TXT3, True).pack(
+            anchor="w", pady=(0, 14))
         self._transcript = self._label(
-            transcript, "等待课堂声音…", 13, TXT2,
-            wraplength=480, justify="left", height=40)
-        self._transcript.pack(fill="both", expand=True)
+            transcript, "等待课堂声音…", 21, TXT2,
+            wraplength=520, justify="left", height=88, anchor="nw")
+        self._transcript.pack(fill="both", expand=True, pady=(0, 8))
         transcript.bind("<Configure>", lambda e: self._transcript.configure(
             wraplength=max(200, int(e.width / self._transcript._get_widget_scaling()) - 2)),
             add="+")
 
         ctk.CTkFrame(panel, height=1, fg_color=RAIL, corner_radius=0).pack(
-            fill="x", padx=20, pady=(12, 10))
+            fill="x", padx=38, pady=(8, 0))
         head = ctk.CTkFrame(panel, fg_color="transparent")
-        head.pack(fill="x", padx=20, pady=(0, 6))
-        self._label(head, "日志", 12, TXT2).pack(side="left")
+        head.pack(fill="x", padx=38, pady=(20, 12))
+        self._label(head, "活动记录", 13, TXT2, True).pack(side="left")
         self._button(head, "清空", self.clear_log, width=42, height=28,
-                     font=(F, 11)).pack(side="right")
+                     font=(F, 12)).pack(side="right")
         ctk.CTkCheckBox(
             head, text="自动滚动", variable=self.v_follow, width=90, height=22,
             checkbox_width=14, checkbox_height=14, corner_radius=4,
             border_width=1, border_color=TXT3, fg_color=PRIMARY,
             hover_color=PRIMARY_HOVER, checkmark_color=BUTTON_TEXT,
-            text_color=TXT3, font=(F, 11)).pack(side="right", padx=(0, 8))
+            text_color=TXT3, font=(F, 12)).pack(side="right", padx=(0, 8))
         self.log = ctk.CTkTextbox(
-            panel, font=(F, 12), height=100, fg_color=CARD,
+            panel, font=(F, 14), height=100, fg_color=BG,
             text_color=TXT2, border_width=0, corner_radius=0,
-            wrap="word", spacing1=3, spacing3=4,
-            scrollbar_button_color=RAIL,
+            wrap="word", spacing1=5, spacing3=5,
+            scrollbar_button_color=BG,
             scrollbar_button_hover_color=INPUT_BORDER)
-        self.log.pack(fill="both", expand=True, padx=14, pady=(0, 14))
+        self.log.pack(fill="both", expand=True, padx=32, pady=(0, 24))
         self._apply_log_colors()
         self.log.configure(state="disabled")
-        self._empty_log = self._label(self.log, "暂无记录", 12, TXT3)
+        self._empty_log = self._label(self.log, "暂无活动记录", 13, TXT3)
         self._empty_log.place(relx=0.5, rely=0.5, anchor="center")
 
     # ---------- 配置与即时反馈 ----------
@@ -628,7 +654,7 @@ class App(ctk.CTk):
         self._appearance = "light" if self._appearance == "dark" else "dark"
         ctk.set_appearance_mode(self._appearance)
         self.b_theme.configure(
-            text="切换浅色" if self._appearance == "dark" else "切换深色")
+            text="浅色" if self._appearance == "dark" else "深色")
         self._apply_log_colors()
         # 单独记住主题，不提交表单中尚未保存的账号或其他修改。
         cfg = copy.deepcopy(self.cfg)
@@ -820,9 +846,10 @@ class App(ctk.CTk):
             tag = "asr"
         else:
             tag = "info"
+        display_line = re.sub(r"^\[(?:ASR [^\]]+|i|OK)\]\s*", "", line)
         self.log.configure(state="normal")
         self.log.insert("end", time.strftime("%H:%M:%S") + "  ", ("time",))
-        self.log.insert("end", line + "\n", (tag,))
+        self.log.insert("end", display_line + "\n", (tag,))
         excess = int(self.log.index("end-1c").split(".")[0]) - 1 - MAX_LOG_LINES
         if excess > 0:
             self.log.delete("1.0", f"{excess + 1}.0")
