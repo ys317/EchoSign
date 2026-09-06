@@ -13,7 +13,7 @@ def main():
         draw.rounded_rectangle(
             (x, 128 - height / 2, x + 20, 128 + height / 2),
             radius=8, fill="#ffffff")
-    image.save(Path(__file__).with_name("echosign.ico"),
+    image.save(Path(__file__).resolve().parents[1] / "assets" / "echosign.ico",
                sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 
 

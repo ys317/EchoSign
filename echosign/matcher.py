@@ -45,7 +45,9 @@ class SemanticMatcher:
         self.templates = list(templates)
         from fastembed import TextEmbedding  # lazy; only when enabled
 
-        self._model = TextEmbedding(model_name=model)
+        from echosign.runtime import semantic_model_options
+
+        self._model = TextEmbedding(model_name=model, **semantic_model_options(model))
 
         import numpy as np
 

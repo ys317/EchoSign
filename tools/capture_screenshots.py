@@ -16,7 +16,7 @@ from PIL import ImageGrab
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import echosign_app as ui  # noqa: E402
+from echosign import gui as ui  # noqa: E402
 
 
 class DemoApp(ui.App):

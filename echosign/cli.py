@@ -1,9 +1,9 @@
 """Entry point.
 
-  python main.py devices            # 列出可用输出设备(供 config.device 选用)
-  python main.py run                # 内录系统声音并开始监控
-  python main.py test FILE.wav      # 离线用 wav 文件走一遍识别+匹配(测试用)
-  python main.py demo               # 用示例文本演示匹配规则命中情况
+  python -m echosign.cli devices        # 列出可用输出设备
+  python -m echosign.cli run            # 启动监控
+  python -m echosign.cli test FILE.wav  # 识别音频文件
+  python -m echosign.cli demo           # 检查规则匹配
 """
 from __future__ import annotations
 
@@ -14,12 +14,12 @@ import time
 
 import yaml
 
-from automonitor.alert import Alerter
-from automonitor.asr import StreamingASR
-from automonitor.autosign import make_auto_signer
-from automonitor.capture import LoopbackSource, WavFileSource
-from automonitor.matcher import build_matchers
-from automonitor.watcher import SignInWatcher, extract_codes
+from echosign.alert import Alerter
+from echosign.asr import StreamingASR
+from echosign.autosign import make_auto_signer
+from echosign.capture import LoopbackSource, WavFileSource
+from echosign.matcher import build_matchers
+from echosign.watcher import SignInWatcher, extract_codes
 
 
 def load_config(path: str) -> dict:
@@ -181,7 +181,7 @@ def cmd_code() -> None:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(prog="automonitor")
+    p = argparse.ArgumentParser(prog="echosign")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("devices")
     prun = sub.add_parser("run")

@@ -2,7 +2,7 @@
   开App页 -> 点"课堂签到" -> #/sign/in 数字键盘 -> 点码 -> 点签到 -> 抓接口结果
 
 Usage:
-  .venv\\Scripts\\python.exe -X utf8 browser_sign.py <4位码>
+  python -m echosign --sign <4位码>
 """
 from __future__ import annotations
 
@@ -15,8 +15,9 @@ from urllib.parse import parse_qs, urlparse
 import yaml
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
 
-from browser_login import ROOT, _cleanup_stale_profile, load_secrets, try_sso_login
-from automonitor.sign_result import SignResult, classify_response
+from echosign.browser_login import ROOT, _cleanup_stale_profile, load_secrets, try_sso_login
+from echosign.sign_result import SignResult, classify_response
+from echosign.runtime import configure_browser_runtime
 
 START = "https://skl.hdu.edu.cn/index.html"
 
@@ -121,6 +122,7 @@ def main(argv=None) -> int:
     if len(code) != 4 or not code.isascii() or not code.isdigit():
         parser.error("签到码必须是四位数字")
     try:
+        configure_browser_runtime()
         secrets = load_secrets()
         _cleanup_stale_profile()
         with sync_playwright() as pw:

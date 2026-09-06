@@ -13,13 +13,10 @@ run_err.txt
 .venv/
 models/
 browser_profile/
-tests/shots/
-tests/e2e_alerts.jsonl
-
 dist/
 build/
 *.spec
-!EchoSign.spec
+!packaging/EchoSign.spec
 sign_out.txt
 sign_err.txt
 *.zip

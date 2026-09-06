@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import yaml
 
-import echosign_app as ui
+from echosign import gui as ui
 
 
 class GuiTests(unittest.TestCase):

@@ -9,7 +9,6 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-import runpy
 import subprocess
 import sys
 import tempfile
@@ -18,11 +17,12 @@ import unittest
 
 import numpy as np
 
-import browser_sign
-import main as monitor
-from automonitor.autosign import AutoSigner
-from automonitor.capture import LoopbackSource
-from automonitor.sign_result import SignResult, classify_response
+from echosign import browser_sign
+from echosign import cli as monitor
+from echosign.__main__ import main as app_main
+from echosign.autosign import AutoSigner
+from echosign.capture import LoopbackSource
+from echosign.sign_result import SignResult, classify_response
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -117,16 +117,15 @@ class SignResultTests(unittest.TestCase):
         captured = []
         args = ["EchoSign.exe", "--sign", "1234", "--result-file", "result.json"]
 
-        def fake_main():
-            captured.extend(sys.argv)
+        def fake_main(argv):
+            captured.extend(argv)
             return 1
 
         with patch.object(sys, "frozen", True, create=True), patch.object(sys, "argv", args), \
                 patch("os.chdir"), patch.object(browser_sign, "main", side_effect=fake_main):
-            with self.assertRaises(SystemExit) as stopped:
-                runpy.run_path(str(ROOT / "echosign_app.py"))
-        self.assertEqual(stopped.exception.code, 1)
-        self.assertEqual(captured, ["browser_sign.py", "1234", "--result-file", "result.json"])
+            exit_code = app_main()
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(captured, ["1234", "--result-file", "result.json"])
 
 
 class DispatcherTests(unittest.TestCase):
@@ -146,7 +145,7 @@ class DispatcherTests(unittest.TestCase):
             return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
 
         signer = AutoSigner(lambda reason, text: notifications.append((reason, text)))
-        with patch("automonitor.autosign.subprocess.run", side_effect=child), \
+        with patch("echosign.autosign.subprocess.run", side_effect=child), \
                 patch.object(sys, "frozen", frozen, create=True), redirect_stdout(StringIO()):
             signer._sign_one("1234")
         self.assertEqual(len(notifications), 1)
@@ -169,7 +168,11 @@ class DispatcherTests(unittest.TestCase):
             with self.subTest(frozen=frozen):
                 notification, command = self.dispatch(SignResult("success", "1234", "OK"), stdout=None, frozen=frozen)
                 self.assertIn("自动签到成功", notification[0])
-                self.assertEqual("--sign" in command, frozen)
+                self.assertIn("--sign", command)
+                if frozen:
+                    self.assertEqual(command[:2], [sys.executable, "--sign"])
+                else:
+                    self.assertEqual(command[:5], [sys.executable, "-X", "utf8", "-m", "echosign"])
 
     def test_abnormal_exit_never_reports_success(self):
         notification, _ = self.dispatch(SignResult("success", "1234", "OK"), returncode=1)
@@ -184,7 +187,7 @@ class DispatcherTests(unittest.TestCase):
     def test_timeout_is_unknown_and_does_not_retry(self):
         notifications = []
         signer = AutoSigner(lambda reason, text: notifications.append((reason, text)))
-        with patch("automonitor.autosign.subprocess.run", side_effect=subprocess.TimeoutExpired("test", 1)) as run, \
+        with patch("echosign.autosign.subprocess.run", side_effect=subprocess.TimeoutExpired("test", 1)) as run, \
                 redirect_stdout(StringIO()):
             signer._sign_one("1234")
         run.assert_called_once()

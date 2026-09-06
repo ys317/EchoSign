@@ -1,6 +1,6 @@
 """One-time interactive browser login: skl.hdu.edu.cn -> CAS SSO -> persist profile.
 
-Run: .venv\\Scripts\\python.exe -X utf8 browser_login.py
+Run: python -m echosign.browser_login
 Uses secrets_local.json credentials when the SSO login form appears.
 Prints localStorage sessionId (= X-Auth-Token) at the end and saves to
 session_local.json. The browser profile is kept in browser_profile/ so
@@ -9,20 +9,13 @@ later sign-ins are already logged in.
 from __future__ import annotations
 
 import json
-import os
-import pathlib
 import sys
 import time
 
 from playwright.sync_api import sync_playwright
+from echosign.runtime import application_root, configure_browser_runtime
 
-if getattr(sys, "frozen", False):
-    ROOT = pathlib.Path(sys.executable).parent  # PyInstaller: exe 所在目录
-    # 冻结环境下 playwright 会误找包内 .local-browsers, 指回系统浏览器目录
-    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(
-        pathlib.Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright")
-else:
-    ROOT = pathlib.Path(__file__).resolve().parent
+ROOT = application_root()
 PROFILE = ROOT / "browser_profile"
 START = "https://skl.hdu.edu.cn/index.html"
 
@@ -95,6 +88,7 @@ def _cleanup_stale_profile() -> None:
 
 
 def main() -> int:
+    configure_browser_runtime()
     secrets = load_secrets()
     _cleanup_stale_profile()
     with sync_playwright() as pw:

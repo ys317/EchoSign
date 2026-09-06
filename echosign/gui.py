@@ -1,6 +1,6 @@
 """EchoSign desktop console.
 
-  python echosign_app.py           # 图形界面
+  python -m echosign               # 图形界面
   EchoSign.exe --sign 2330         # 打包后自动签到入口（内部使用）
 """
 from __future__ import annotations
@@ -8,7 +8,6 @@ from __future__ import annotations
 import copy
 import json
 import math
-import os
 import queue
 import re
 import sys
@@ -20,28 +19,20 @@ from pathlib import Path
 from tkinter import font as tkfont
 from urllib.parse import urlparse
 
-if getattr(sys, "frozen", False):
-    APP_ROOT = Path(sys.executable).parent
-else:
-    APP_ROOT = Path(__file__).resolve().parent
-os.chdir(APP_ROOT)
+import customtkinter as ctk
+import yaml
+from PIL import Image, ImageDraw
 
-# AutoSigner 在打包环境中通过同一个 exe 启动浏览器签到。
-if len(sys.argv) >= 3 and sys.argv[1] == "--sign":
-    sys.argv = ["browser_sign.py", *sys.argv[2:]]
-    import browser_sign
+from echosign import __version__
+from echosign.runtime import application_root, resource_root
 
-    sys.exit(browser_sign.main())
-
-import customtkinter as ctk  # noqa: E402
-import yaml  # noqa: E402
-from PIL import Image, ImageDraw  # noqa: E402
+APP_ROOT = application_root()
 
 CONFIG = APP_ROOT / "config.yaml"
 SECRETS = APP_ROOT / "secrets_local.json"
-RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", APP_ROOT))
+RESOURCE_ROOT = resource_root()
 
-APP_VERSION = "v1.3"
+APP_VERSION = f"v{__version__}"
 F = "Microsoft YaHei UI"
 FL = "Segoe UI Semibold"
 FM = "Cascadia Mono"
@@ -457,7 +448,7 @@ class App(ctk.CTk):
             border_color=INPUT_BORDER), add="+")
         self._divider(page, 16)
         self._switch_row(
-            page, "语义辅助识别", "识别相近话术，首次加载较慢",
+            page, "语义辅助识别", "识别相近话术，在本机运行",
             self.v_sem)
 
 
@@ -785,7 +776,7 @@ class App(ctk.CTk):
         self.stop_event.clear()
 
         def run(cfg):
-            import main as monitor
+            from echosign import cli as monitor
 
             if not self.stop_event.is_set():
                 monitor.cmd_run(cfg, self.stop_event)
@@ -805,7 +796,7 @@ class App(ctk.CTk):
             return
 
         def run():
-            import browser_login
+            from echosign import browser_login
 
             return browser_login.main()
 
@@ -821,7 +812,7 @@ class App(ctk.CTk):
             return
 
         def run(cfg):
-            import main as monitor
+            from echosign import cli as monitor
 
             monitor.cmd_webhook_test(cfg)
 

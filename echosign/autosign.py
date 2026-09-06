@@ -1,4 +1,4 @@
-"""Auto sign-in dispatcher: run browser_sign.py in a subprocess when a code is heard."""
+"""Auto sign-in dispatcher: run an isolated browser task when a code is heard."""
 from __future__ import annotations
 
 import subprocess
@@ -7,10 +7,10 @@ import tempfile
 import threading
 from pathlib import Path
 
-from automonitor.sign_result import SignResult
+from echosign.sign_result import SignResult
+from echosign.runtime import application_root
 
-ROOT = Path(__file__).resolve().parents[1]
-PY = ROOT / ".venv" / "Scripts" / "python.exe"
+ROOT = application_root()
 
 
 class AutoSigner:
@@ -45,7 +45,7 @@ class AutoSigner:
         if getattr(sys, "frozen", False):
             cmd = [sys.executable, "--sign", code]  # 打包后自调用
         else:
-            cmd = [str(PY), "-X", "utf8", str(ROOT / "browser_sign.py"), code]
+            cmd = [sys.executable, "-X", "utf8", "-m", "echosign", "--sign", code]
         result = SignResult("unknown", code, "浏览器未返回明确的签到结果，请到平台核对")
         try:
             # Windowed executables may not expose stdout. Use a private result file
