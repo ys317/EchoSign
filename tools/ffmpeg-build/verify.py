@@ -178,8 +178,11 @@ def https_check(ffmpeg: Path, flv: bytes) -> list[dict]:
             folder = Path(directory)
             root_file = folder / "root.cer"
             root_file.write_bytes(ca.public_bytes(serialization.Encoding.DER))
-            checked(["certutil.exe", "-user", "-addstore", "Root", str(root_file)])
+            # CurrentUser root import can open a trust-confirmation dialog.
+            # This disposable hosted runner is elevated; use its machine store
+            # noninteractively, then remove only our unique generated test CA.
             imported = True
+            checked(["certutil.exe", "-f", "-addstore", "Root", str(root_file)])
             for name, host, sans, trusted, should_pass in cases:
                 key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
                 subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test.invalid")])
@@ -232,7 +235,7 @@ def https_check(ffmpeg: Path, flv: bytes) -> list[dict]:
     finally:
         try:
             if imported:
-                checked(["certutil.exe", "-user", "-delstore", "Root", thumbprint])
+                checked(["certutil.exe", "-delstore", "Root", thumbprint])
         finally:
             crl_server.shutdown()
             crl_server.server_close()
