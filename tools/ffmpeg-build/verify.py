@@ -87,7 +87,8 @@ def audio_check(ffmpeg: Path, record: Path) -> tuple[dict, bytes]:
     for flag in ("--disable-gpl", "--disable-nonfree", "--disable-version3", "--disable-autodetect", "--enable-schannel"):
         if flag not in configuration:
             raise AssertionError(f"Missing build setting: {flag}")
-    if "GNU Lesser General Public License" not in license_text or "version 2.1" not in license_text:
+    normalized_license = " ".join(license_text.split())
+    if "GNU Lesser General Public License" not in normalized_license or "version 2.1" not in normalized_license:
         raise AssertionError("Unexpected FFmpeg license")
     protocols = checked(command + ["-protocols"]).decode().partition("Input:")[2].partition("Output:")[0].split()
     required = {"file", "pipe", "http", "https", "tcp", "tls", "httpproxy"}
