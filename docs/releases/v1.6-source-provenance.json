@@ -1,0 +1,268 @@
+{
+  "version": "v1.6",
+  "base_commit": "35006377a56e0fd7669d7ae14e9052a1e8bf229f",
+  "original_archive": "EchoSign-v1.6-win64.zip",
+  "original_archive_sha256": "d127e02bd1ba0576891e320bd9bdd32041086fc0caf66d27fb723ecccca64cb8",
+  "files": {
+    "assets/echosign.ico": {
+      "expected_sha256": "938764f305da7c55aeab18b1e7111ead98b7aa29d56b218369c83cbcaf40593b",
+      "sha256": "938764f305da7c55aeab18b1e7111ead98b7aa29d56b218369c83cbcaf40593b",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "assets/licenses/FlagEmbedding-MIT.txt": {
+      "expected_sha256": "d2066728cf4edc752cb7542fb20b97a3cde20fdb26e8d0f0e0900f0fa0ac43ef",
+      "sha256": "d2066728cf4edc752cb7542fb20b97a3cde20fdb26e8d0f0e0900f0fa0ac43ef",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "assets/screenshots/dark.png": {
+      "expected_sha256": "adfdf96408615f28120700827ba002032238477a22667931ac533f5479147bb6",
+      "sha256": "adfdf96408615f28120700827ba002032238477a22667931ac533f5479147bb6",
+      "source": "original-v1.6-archive:EchoSign/assets/screenshots/dark.png",
+      "status": "exact-bytes"
+    },
+    "assets/screenshots/light.png": {
+      "expected_sha256": "55147b684202faff34c8d53ec2eccd90fc1c3e467163b5e144145e64308b5766",
+      "sha256": "55147b684202faff34c8d53ec2eccd90fc1c3e467163b5e144145e64308b5766",
+      "source": "original-v1.6-archive:EchoSign/assets/screenshots/light.png",
+      "status": "exact-bytes"
+    },
+    "config.example.yaml": {
+      "expected_sha256": "531bc1a38c3f65efc857a7ab05749d5bde6e04615c269506d7a2b2d293e20f25",
+      "sha256": "531bc1a38c3f65efc857a7ab05749d5bde6e04615c269506d7a2b2d293e20f25",
+      "source": "original-v1.6-archive:EchoSign/config.example.yaml",
+      "status": "exact-bytes"
+    },
+    "docs/development.md": {
+      "expected_sha256": "4a217e54f9d49abacda08735bfe0cf0f8de300fb2055306a5dad4d32e9e547ed",
+      "sha256": "4a217e54f9d49abacda08735bfe0cf0f8de300fb2055306a5dad4d32e9e547ed",
+      "source": "original-v1.6-archive:EchoSign/docs/development.md",
+      "status": "exact-bytes"
+    },
+    "docs/releases/v1.6.md": {
+      "expected_sha256": "529aaa2c464b00715f3a717e9a0ec708a59e5a5e1c996c45a869d813f7d77a83",
+      "sha256": "529aaa2c464b00715f3a717e9a0ec708a59e5a5e1c996c45a869d813f7d77a83",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "docs/third-party.md": {
+      "expected_sha256": "f776a621f0dcce4be1cb16143e71825af96f59c4fb9dc121f5bed08fab17937b",
+      "sha256": "f776a621f0dcce4be1cb16143e71825af96f59c4fb9dc121f5bed08fab17937b",
+      "source": "original-v1.6-archive:EchoSign/docs/third-party.md",
+      "status": "exact-bytes"
+    },
+    "docs/usage.md": {
+      "expected_sha256": "16d7c6ed268115650798764ed31ebec6feab179e8ab6a1552e775fe57b91ffef",
+      "sha256": "16d7c6ed268115650798764ed31ebec6feab179e8ab6a1552e775fe57b91ffef",
+      "source": "original-v1.6-archive:EchoSign/docs/usage.md",
+      "status": "exact-bytes"
+    },
+    "echosign/__init__.py": {
+      "expected_sha256": "28ed960b0eaff608ac06b409e9ce2fbbec58421ddc596c603ecfd2ea1de0c703",
+      "sha256": "28ed960b0eaff608ac06b409e9ce2fbbec58421ddc596c603ecfd2ea1de0c703",
+      "source": "version-recovered-from-v1.6.1",
+      "status": "exact-bytes"
+    },
+    "echosign/__main__.py": {
+      "expected_sha256": "baaa868661f38ce48a1e4a4ab3218fb422b536a6c42bfe4c9ec43b9612095d20",
+      "sha256": "baaa868661f38ce48a1e4a4ab3218fb422b536a6c42bfe4c9ec43b9612095d20",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "echosign/alert.py": {
+      "expected_sha256": "bc095e81264e9d21fae61d73bc6346e256b368cba8b04dcd741578c7cae4320b",
+      "sha256": "bc095e81264e9d21fae61d73bc6346e256b368cba8b04dcd741578c7cae4320b",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "echosign/attendance.py": {
+      "expected_sha256": "004445830a408be624c5c50230ce704be5a8197e6a42ed495c7bc379012e514f",
+      "sha256": "004445830a408be624c5c50230ce704be5a8197e6a42ed495c7bc379012e514f",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "echosign/audio.py": {
+      "expected_sha256": "e5c4bf3c52dc7603ce1154626014c83ea1f59eb4fa60b4fc8da136ede7096e70",
+      "sha256": "e5c4bf3c52dc7603ce1154626014c83ea1f59eb4fa60b4fc8da136ede7096e70",
+      "source": "source-recovery-v1.6",
+      "status": "exact-bytes"
+    },
+    "echosign/browser.py": {
+      "expected_sha256": "fdcfbf64a6514492afef0a687f6f086df896af15d477ba3451f005c76b5af8b0",
+      "sha256": "fdcfbf64a6514492afef0a687f6f086df896af15d477ba3451f005c76b5af8b0",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "echosign/gui.py": {
+      "expected_sha256": "22e825af759b04df729a93ebc3887d94a57c0e74a03edcfbceef0975acc2eba4",
+      "sha256": "000510b0e580f9137933cc4e3a573abcc27e436729abf3f5c0d673d62aed80e1",
+      "source": "historical-edit-recovery-and-original-PYZ",
+      "status": "compiled-code-and-line-tables-match",
+      "code_objects": 69
+    },
+    "echosign/location.py": {
+      "expected_sha256": "074ce8f9ce301b9c597a67d846131284014ff893c9b1b6ff88ec578ca6592d57",
+      "sha256": "074ce8f9ce301b9c597a67d846131284014ff893c9b1b6ff88ec578ca6592d57",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "echosign/monitor.py": {
+      "expected_sha256": "9ad3ba1696ab5ed20a757ef39c4d17d468efc90cef83638cd79cc3a7eb8a32e7",
+      "sha256": "9ad3ba1696ab5ed20a757ef39c4d17d468efc90cef83638cd79cc3a7eb8a32e7",
+      "source": "source-recovery-v1.6",
+      "status": "exact-bytes"
+    },
+    "echosign/processes.py": {
+      "expected_sha256": "bb4d1ae61baa65728388c30f991151010bda8e15d6dbce85face99b1b0fccd94",
+      "sha256": "bb4d1ae61baa65728388c30f991151010bda8e15d6dbce85face99b1b0fccd94",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "echosign/rules.py": {
+      "expected_sha256": "780a2537253a88d676e82be8ae82b32e254bfcb1f1e43d65665835b239fcdd8c",
+      "sha256": "780a2537253a88d676e82be8ae82b32e254bfcb1f1e43d65665835b239fcdd8c",
+      "source": "source-recovery-v1.6",
+      "status": "exact-bytes"
+    },
+    "echosign/runtime.py": {
+      "expected_sha256": "b18a56926ea3b7b09985ca3338f81f5d99b631dd2e43346915441df3e98ee567",
+      "sha256": "b18a56926ea3b7b09985ca3338f81f5d99b631dd2e43346915441df3e98ee567",
+      "source": "git:35006377a56e",
+      "status": "exact-bytes"
+    },
+    "echosign/ui.py": {
+      "expected_sha256": "36e902b59ca29d4fd0c94e49ec1a6bb8db5466c20c4587516bb0cb00ba58af0b",
+      "sha256": "36e902b59ca29d4fd0c94e49ec1a6bb8db5466c20c4587516bb0cb00ba58af0b",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "LICENSE": {
+      "expected_sha256": "1c27c31664f0cae81e12e23d9f9db7b4fff85a33ad4c53d8be16365655fb01c5",
+      "sha256": "1c27c31664f0cae81e12e23d9f9db7b4fff85a33ad4c53d8be16365655fb01c5",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "README.md": {
+      "expected_sha256": "448d02762dd795f68584130f5903d4bcdf53948e7690844161644c92cd60cdcf",
+      "sha256": "448d02762dd795f68584130f5903d4bcdf53948e7690844161644c92cd60cdcf",
+      "source": "original-v1.6-archive:EchoSign/README.md",
+      "status": "exact-bytes"
+    },
+    "requirements.txt": {
+      "expected_sha256": "455f128b66a4114ce59ae3cb2f8f49b94e91b53980642ad2c8cfc5dc20f937c5",
+      "sha256": "455f128b66a4114ce59ae3cb2f8f49b94e91b53980642ad2c8cfc5dc20f937c5",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "tests/e2e_codes.jsonl": {
+      "expected_sha256": "8e40ad059f154b05160c8d2549ad07b32b803c87f31ea3a8cf56e93b690e043e",
+      "status": "omitted-generated-log"
+    },
+    "tests/fixtures/signin.wav": {
+      "expected_sha256": "76510e0650d09edf596c39711c7924e9af61df610c334c410e2f24551f77eca5",
+      "sha256": "76510e0650d09edf596c39711c7924e9af61df610c334c410e2f24551f77eca5",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "tests/test_attendance.py": {
+      "expected_sha256": "7fc38ceb88873b9dc7f62accf6ff533cc6804de6fdcb304bbd0bf90926410eab",
+      "sha256": "7fc38ceb88873b9dc7f62accf6ff533cc6804de6fdcb304bbd0bf90926410eab",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "tests/test_audio.py": {
+      "expected_sha256": "5bf5afb0c68315356ac85219232ba8c3da0431d2a44ff76b1b6775a340054c24",
+      "sha256": "5bf5afb0c68315356ac85219232ba8c3da0431d2a44ff76b1b6775a340054c24",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "tests/test_early_codes.py": {
+      "expected_sha256": "fabc14f4259692e2d8da65949e09f82d8d02b36ef8bdd39040f95221e7261c5c",
+      "sha256": "fabc14f4259692e2d8da65949e09f82d8d02b36ef8bdd39040f95221e7261c5c",
+      "source": "source-recovery-v1.6",
+      "status": "exact-bytes"
+    },
+    "tests/test_gui.py": {
+      "expected_sha256": "031d704c2eef5913190a41814ff6186838f5a1079714b5313d280dc452577528",
+      "sha256": "031d704c2eef5913190a41814ff6186838f5a1079714b5313d280dc452577528",
+      "source": "source-recovery-v1.6",
+      "status": "exact-bytes"
+    },
+    "tests/test_location.py": {
+      "expected_sha256": "4d105f244b403c76c4479c4ddb89e77aaf5b135e3e28541feba25eb1a7a85192",
+      "sha256": "4d105f244b403c76c4479c4ddb89e77aaf5b135e3e28541feba25eb1a7a85192",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "tests/test_matcher.py": {
+      "expected_sha256": "bbc7b92a67b4b7212c30811df5747aa983a2edac447e615a05c289d17bed8f2e",
+      "sha256": "bbc7b92a67b4b7212c30811df5747aa983a2edac447e615a05c289d17bed8f2e",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "tests/test_prepared_browser.py": {
+      "expected_sha256": "5dcd5b7ac646848ec801370d6e4f7fc4017979f2319961ca8f1008476fd5f40b",
+      "sha256": "5dcd5b7ac646848ec801370d6e4f7fc4017979f2319961ca8f1008476fd5f40b",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "tests/test_release.py": {
+      "expected_sha256": "231bf17723d1c9b8c66f9fa149395a6a3f722b670e3b2a155f99a1c82a30a849",
+      "sha256": "231bf17723d1c9b8c66f9fa149395a6a3f722b670e3b2a155f99a1c82a30a849",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "tests/test_reliability.py": {
+      "expected_sha256": "eb56cc8ba91cb80db1cf3daee8cd7c77b6b113dd8f18c446bcf3a7049a553b0c",
+      "sha256": "eb56cc8ba91cb80db1cf3daee8cd7c77b6b113dd8f18c446bcf3a7049a553b0c",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "tests/test_replay_metrics.py": {
+      "expected_sha256": "892614085f34c6925dececbc0ce3fd0357841a1acc1b7b5d9ba073f9b98d54aa",
+      "sha256": "892614085f34c6925dececbc0ce3fd0357841a1acc1b7b5d9ba073f9b98d54aa",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    },
+    "tests/test_runtime.py": {
+      "expected_sha256": "2a25f2829238c040e7d05d243cb63bc9b5c1a7475be18ecc9f42b5f9e3d80477",
+      "sha256": "2a25f2829238c040e7d05d243cb63bc9b5c1a7475be18ecc9f42b5f9e3d80477",
+      "source": "git:35006377a56e",
+      "status": "exact-bytes"
+    },
+    "tests/w_test.jsonl": {
+      "expected_sha256": "c0b3e1490cd9b70bce6bc3bc7949329719a9d631829dc3b9bfa197b08e736810",
+      "status": "omitted-generated-log"
+    },
+    "tests/wh_test.jsonl": {
+      "expected_sha256": "7cf3d584fc87e15094e9e72f7220f0840f788f52e0993036fd178e5450420983",
+      "status": "omitted-generated-log"
+    },
+    "tools/assets.py": {
+      "expected_sha256": "a161feb7d5609de6493a508c4556d170d74a10d81b3105b3f4a8365bd0884b6e",
+      "sha256": "a161feb7d5609de6493a508c4556d170d74a10d81b3105b3f4a8365bd0884b6e",
+      "source": "source-recovery-v1.6",
+      "status": "exact-bytes"
+    },
+    "tools/EchoSign.spec": {
+      "expected_sha256": "b05ddc45062092cf6c571f33efefce9ca03c0b0ce773a5450fe911622d3edeba",
+      "sha256": "b05ddc45062092cf6c571f33efefce9ca03c0b0ce773a5450fe911622d3edeba",
+      "source": "git:35006377a56e",
+      "status": "exact-bytes"
+    },
+    "tools/release.py": {
+      "expected_sha256": "08a5fecfd84e280f724e2f1e11bec234391dc8f5dea03b45b722e04fd701adf4",
+      "sha256": "08a5fecfd84e280f724e2f1e11bec234391dc8f5dea03b45b722e04fd701adf4",
+      "source": "source-recovery-v1.6",
+      "status": "exact-bytes"
+    },
+    "tools/replay_metrics.py": {
+      "expected_sha256": "ada0f4f528915e7b1164177f9e1b994e8bbbe9f5ed852e45adc13c6a56080b05",
+      "sha256": "ada0f4f528915e7b1164177f9e1b994e8bbbe9f5ed852e45adc13c6a56080b05",
+      "source": "source-snapshots/v1.6.1",
+      "status": "exact-bytes"
+    }
+  },
+  "note": "Three generated logs are omitted. GUI source text differs; compiled code, constants and line tables match the original binary."
+}

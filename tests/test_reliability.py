@@ -5,7 +5,7 @@ No school login, sign-in request, webhook, or audio device is used.
 from __future__ import annotations
 
 from contextlib import ExitStack, redirect_stdout
-from io import StringIO
+from io import BytesIO, StringIO, TextIOWrapper
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -132,6 +132,23 @@ class SignResultTests(unittest.TestCase):
             self.assertEqual(app_main(["test", "class.wav", "--realtime"]), 0)
         command.assert_called_once_with(["test", "class.wav", "--realtime"])
 
+    def test_frozen_redirected_output_handles_non_gbk_transcription(self):
+        stdout_data, stderr_data = BytesIO(), BytesIO()
+        with TextIOWrapper(stdout_data, encoding="gbk", newline="\n") as stdout, \
+                TextIOWrapper(stderr_data, encoding="gbk", newline="\n") as stderr:
+            def command(_):
+                print("转写含特殊字符：�")
+                print("诊断：�", file=sys.stderr)
+                return 0
+            with patch.object(sys, "frozen", True, create=True), \
+                    patch.object(sys, "stdout", stdout), patch.object(sys, "stderr", stderr), \
+                    patch("os.chdir"), patch.object(monitor, "main", side_effect=command):
+                self.assertEqual(app_main(["code"]), 0)
+            stdout.flush()
+            stderr.flush()
+            self.assertEqual(stdout_data.getvalue().decode("utf-8"), "转写含特殊字符：�\n")
+            self.assertEqual(stderr_data.getvalue().decode("utf-8"), "诊断：�\n")
+
 
 class DispatcherTests(unittest.TestCase):
     def dispatch(self, result=None, stdout="", returncode=0, malformed=False, frozen=False):
@@ -150,7 +167,7 @@ class DispatcherTests(unittest.TestCase):
             return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
 
         signer = AutoSigner(lambda reason, text: notifications.append((reason, text)))
-        with patch("echosign.attendance.subprocess.run", side_effect=child), \
+        with patch.object(signer, "_run_child", side_effect=child), \
                 patch.object(sys, "frozen", frozen, create=True), redirect_stdout(StringIO()):
             signer._sign_one("1234")
         self.assertEqual(len(notifications), 1)
@@ -192,7 +209,7 @@ class DispatcherTests(unittest.TestCase):
     def test_timeout_is_unknown_and_does_not_retry(self):
         notifications = []
         signer = AutoSigner(lambda reason, text: notifications.append((reason, text)))
-        with patch("echosign.attendance.subprocess.run", side_effect=subprocess.TimeoutExpired("test", 1)) as run, \
+        with patch.object(signer, "_run_child", side_effect=subprocess.TimeoutExpired("test", 1)) as run, \
                 redirect_stdout(StringIO()):
             signer._sign_one("1234")
         run.assert_called_once()
@@ -349,6 +366,70 @@ class CaptureTests(unittest.TestCase):
         with redirect_stdout(StringIO()):
             monitor.run_pipeline([], asr, [], MagicMock(), watcher)
         watcher.on_code.assert_called_once_with("1234", "签到码1234")
+
+    def test_windowed_replay_without_stdout_still_dispatches_the_final_code(self):
+        asr, watcher = MagicMock(), MagicMock()
+        asr.accept.return_value = ([], "一二三")
+        asr.flush.return_value = ["一二三四"]
+        watcher.feed_partial.return_value = []
+        watcher.feed.return_value = [("1234", "一二三四")]
+        with patch.object(sys, "stdout", None):
+            monitor.run_pipeline([np.zeros(160)], asr, [], MagicMock(), watcher)
+        watcher.on_code.assert_called_once_with("1234", "一二三四")
+
+    def test_stop_during_matching_does_not_dispatch_notifications(self):
+        stop = threading.Event()
+        asr = MagicMock()
+        asr.accept.return_value = (["签到码1234"], "")
+        asr.flush.return_value = []
+        matcher = MagicMock()
+        matcher.match.side_effect = lambda _: (stop.set() or ("high", "签到"))
+        watcher, alerter = MagicMock(), MagicMock()
+        with redirect_stdout(StringIO()):
+            monitor.run_pipeline([np.zeros(160)], asr, [matcher], alerter, watcher, stop=stop)
+        alerter.notify.assert_not_called()
+        watcher.feed.assert_not_called()
+
+    def test_stopped_watcher_does_not_queue_a_browser_task(self):
+        stop = threading.Event()
+        alerter, signer = MagicMock(), MagicMock()
+        watcher = monitor.make_watcher({}, alerter, signer, stop)
+        stop.set()
+        watcher.on_code("1234", "签到码1234")
+        alerter.notify.assert_not_called()
+        signer.submit.assert_not_called()
+
+    def test_monitor_closes_signer_even_if_model_initialization_fails(self):
+        signer = MagicMock()
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(monitor, "LoopbackSource"))
+            stack.enter_context(patch.object(monitor, "make_alerter"))
+            stack.enter_context(patch.object(monitor, "make_auto_signer", return_value=signer))
+            stack.enter_context(patch.object(monitor, "build_matchers", return_value=[]))
+            stack.enter_context(patch.object(monitor, "make_engine", side_effect=RuntimeError("model error")))
+            stack.enter_context(redirect_stdout(StringIO()))
+            with self.assertRaisesRegex(RuntimeError, "model error"):
+                monitor.cmd_run({})
+        signer.close.assert_called_once_with()
+
+    def test_wav_replay_drains_on_completion_and_cancels_on_failure(self):
+        for error in (None, RuntimeError("decode failed")):
+            with self.subTest(error=error), ExitStack() as stack:
+                signer = MagicMock()
+                source = MagicMock()
+                stack.enter_context(patch.object(monitor, "WavFileSource", return_value=source))
+                stack.enter_context(patch.object(monitor, "make_alerter"))
+                stack.enter_context(patch.object(monitor, "make_auto_signer", return_value=signer))
+                stack.enter_context(patch.object(monitor, "build_matchers", return_value=[]))
+                stack.enter_context(patch.object(monitor, "make_engine"))
+                stack.enter_context(patch.object(monitor, "run_pipeline", side_effect=error))
+                if error:
+                    with self.assertRaisesRegex(RuntimeError, "decode failed"):
+                        monitor.cmd_test({}, "fake.wav", False)
+                else:
+                    monitor.cmd_test({}, "fake.wav", False)
+                signer.close.assert_called_once_with(cancel=error is not None)
+                source.chunks.return_value.close.assert_called_once_with()
 
 
 if __name__ == "__main__":

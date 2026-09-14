@@ -42,6 +42,9 @@ class DemoApp(ui.App):
     def open_url(self):
         self.logline("[i] 演示模式：未打开外部页面。")
 
+    def locate(self):
+        self.logline("[i] 演示模式：未获取本机位置。")
+
 
 def prepare_demo(directory):
     ui.CONFIG = directory / "config.yaml"
@@ -51,7 +54,7 @@ def prepare_demo(directory):
     cfg["alert"]["webhook"]["url"] = ""
     cfg["rules"]["semantic"]["enabled"] = False
     cfg["auto_sign"]["enabled"] = False
-    cfg["location"] = {"lat": 30.0, "lng": 120.0}
+    cfg["location"] = {"lat": ui.DEFAULT_LAT, "lng": ui.DEFAULT_LNG}
     cfg["ui"] = {"appearance": "dark"}
     ui.CONFIG.write_text(ui.yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
     ui.SECRETS.write_text(json.dumps({

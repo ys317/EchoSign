@@ -26,6 +26,7 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from echosign import __version__
+from echosign.processes import hidden_subprocess_options
 from echosign.runtime import (ASR_FILES, ASR_FOLDER, SEMANTIC_FILES,
                               SEMANTIC_FOLDER, SEMANTIC_MODEL)
 
@@ -85,7 +86,8 @@ def prepare_browsers() -> None:
     if any(not (browsers / f"{c['name']}-{c['revision']}").is_dir() for c in components):
         env = dict(os.environ, PLAYWRIGHT_BROWSERS_PATH=str(browsers))
         subprocess.run([sys.executable, "-m", "playwright", "install", "--no-shell", "chromium"],
-                       cwd=ROOT, env=env, check=True)
+                       cwd=ROOT, env=env, stdin=subprocess.DEVNULL, check=True,
+                       **hidden_subprocess_options())
     # Playwright's cache bookkeeping is unrelated to the portable application.
     for extra in browsers.iterdir():
         if extra.name.startswith("."):
@@ -180,8 +182,8 @@ def verify_archive(archive: Path) -> dict:
         report = workspace / "runtime.json"
         result = subprocess.run([str(workspace / "EchoSign" / "EchoSign.exe"),
                                  "--check-runtime", str(report)],
-                                cwd=workspace, env=env, capture_output=True, timeout=240,
-                                creationflags=subprocess.CREATE_NO_WINDOW)
+                                cwd=workspace, env=env, stdin=subprocess.DEVNULL,
+                                capture_output=True, timeout=240, **hidden_subprocess_options())
         if not report.is_file():
             raise RuntimeError(f"Runtime check exited with {result.returncode} without a report")
         content = json.loads(report.read_text(encoding="utf-8"))
@@ -240,7 +242,8 @@ def build_release() -> None:
         subprocess.run([sys.executable, "-X", "utf8", "-m", "PyInstaller", "--noconfirm", "--clean",
                         "--distpath", str(DIST), "--workpath", str(BUILD / "pyinstaller" / VERSION),
                         str(ROOT / "tools" / "EchoSign.spec")],
-                       cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT, check=True)
+                       cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream,
+                       stderr=subprocess.STDOUT, check=True, **hidden_subprocess_options())
     app = DIST / "EchoSign"
     copy_files(ROOT, app, ["README.md", "LICENSE", "config.example.yaml"])
     shutil.copytree(ROOT / "docs", app / "docs")
@@ -278,7 +281,8 @@ def build_release() -> None:
 
 
 def git(*args: str) -> str:
-    return subprocess.check_output(["git", *args], cwd=ROOT, text=True, encoding="utf-8").strip()
+    return subprocess.check_output(["git", *args], cwd=ROOT, stdin=subprocess.DEVNULL,
+                                   text=True, encoding="utf-8", **hidden_subprocess_options()).strip()
 
 
 def github_session() -> requests.Session:
@@ -287,7 +291,8 @@ def github_session() -> requests.Session:
         env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
         result = subprocess.run(["git", "credential", "fill"],
                                 input="protocol=https\nhost=github.com\n\n",
-                                capture_output=True, text=True, env=env, timeout=30)
+                                capture_output=True, text=True, env=env, timeout=30,
+                                **hidden_subprocess_options())
         fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
         token = fields.get("password")
     if not token:

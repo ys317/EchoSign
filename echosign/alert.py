@@ -10,17 +10,20 @@ from typing import Dict, Iterable
 
 class Alerter:
     def __init__(self, log_file: str = "alerts.jsonl", dedup_seconds: float = 90,
-                 webhook_url: str = "", webhook_levels: Iterable[str] = ("high", "code")):
+                 webhook_url: str = "", webhook_levels: Iterable[str] = ("high", "code"),
+                 clock=None):
         self.log_file = log_file
         self.dedup_seconds = dedup_seconds
         self.webhook_url = webhook_url.strip()
         self.webhook_levels = tuple(webhook_levels)
+        self.clock = clock or time.time  # file replay passes the audio position
         self._last_fire: Dict[str, float] = {}
 
     def notify(self, text: str, level: str, reason: str) -> bool:
         key = f"{level}|{text.strip()[:40]}"
-        now = time.time()
-        if now - self._last_fire.get(key, 0) < self.dedup_seconds:
+        now = self.clock()
+        last = self._last_fire.get(key)
+        if last is not None and now - last < self.dedup_seconds:
             return False
         self._last_fire[key] = now
 
@@ -42,7 +45,8 @@ class Alerter:
         return True
 
     def _send_wechat(self, ts: str, level: str, reason: str, text: str) -> None:
-        label = {"high": "签到", "medium": "疑似签到", "code": "签到码", "semantic": "语义"}.get(level, level)
+        label = {"high": "签到", "medium": "疑似签到", "code": "签到码", "semantic": "语义",
+                 "test": "测试"}.get(level, level)
         if level == "code":
             body = f"**【{label}】{reason}**\n> 时间: {ts}\n> 原句: {text}"
         else:

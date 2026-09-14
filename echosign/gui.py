@@ -23,6 +23,7 @@ import customtkinter as ctk
 import yaml
 
 from echosign import __version__, ui as design
+from echosign.location import DEFAULT_LAT, DEFAULT_LNG, Location, LocationError, get_current_location
 from echosign.ui import Entry, Switch
 from echosign.runtime import application_root, resource_root
 
@@ -97,6 +98,8 @@ class App(ctk.CTk):
         self._poll_job = None
         self._tick_job = None
         self._copy_job = None
+        self._close_job = None
+        self._closing = False
         self._code: str | None = None
         self._has_transcript = False
         self._pages = {}
@@ -216,9 +219,9 @@ class App(ctk.CTk):
         self._select_tab("basic")
 
 
-    def _field(self, parent, key, title, var, show="", action=None):
+    def _field(self, parent, key, title, var, show="", action=None, bottom=16):
         box = ctk.CTkFrame(parent, fg_color="transparent")
-        box.pack(fill="x", pady=(0, 16))
+        box.pack(fill="x", pady=(0, bottom))
         caption = ctk.CTkFrame(box, fg_color="transparent", height=22)
         caption.pack(fill="x", pady=(0, 6))
         caption.pack_propagate(False)
@@ -235,19 +238,24 @@ class App(ctk.CTk):
         return entry
 
     def _basic_page(self, page):
-        self._field(page, "url", "直播网址", self.v_url,
-                    action=("打开 ↗", self.open_url))
+        self._field(page, "url", "直播网址（选填）", self.v_url,
+                    action=("打开 ↗", self.open_url), bottom=6)
+        self._label(
+            page, "仅用于快捷打开；已在浏览器播放可留空。",
+            11, design.TXT3, wraplength=244, justify="left").pack(fill="x", pady=(0, 4))
         self._divider(page, (2, 12))
-        self._field(page, "user", "学号", self.v_user)
+        self._field(page, "user", "学号", self.v_user, bottom=12)
         self.e_pwd = self._field(
             page, "pwd", "密码", self.v_pwd, show="•",
-            action=("显示密码", self._toggle_password))
+            action=("显示密码", self._toggle_password), bottom=12)
         self.b_pwd = self._field_actions["pwd"]
         self.b_login = self._button(
             page, "登录 / 刷新", self.do_login, height=36,
             border_color=design.INPUT_BORDER, border_width=1)
         self.b_login.pack(fill="x")
-        self._divider(page, (18, 12))
+        self._divider(page, (12, 8))
+        self._location_fields(page)
+        self._divider(page, (12, 8))
         self._switch_row(
             page, "自动签到", "识别到签到码后自动提交", self.v_auto)
 
@@ -276,8 +284,15 @@ class App(ctk.CTk):
             show="•", action=("测试推送", self.test_webhook))
         self.b_test = self._field_actions["hook"]
         self._label(page, "选填，留空时仅在本机提醒", 11, design.TXT3).pack(anchor="w")
-        self._divider(page, 18)
-        self._label(page, "签到位置", 13, design.TXT2).pack(anchor="w", pady=(0, 8))
+
+    def _location_fields(self, page):
+        caption = ctk.CTkFrame(page, fg_color="transparent")
+        caption.pack(fill="x", pady=(0, 8))
+        self._label(caption, "签到位置", 13, design.TXT2).pack(side="left")
+        self.b_locate = self._button(
+            caption, "获取当前位置", self.locate, width=96, height=26,
+            font=(design.F, 11))
+        self.b_locate.pack(side="right")
         row = ctk.CTkFrame(page, fg_color="transparent")
         row.pack(fill="x")
         row.grid_columnconfigure((0, 1), weight=1, uniform="location")
@@ -285,7 +300,11 @@ class App(ctk.CTk):
                 ("lat", "纬度", self.v_lat), ("lng", "经度", self.v_lng))):
             col = ctk.CTkFrame(row, fg_color="transparent")
             col.grid(row=0, column=i, sticky="ew", padx=(0, 10) if i == 0 else 0)
-            self._field(col, key, title, var)
+            self._field(col, key, title, var, bottom=8)
+        self._location_hint = self._label(
+            page, "可通过 Windows 定位填入，请核对后保存。",
+            11, design.TXT3, wraplength=244, justify="left")
+        self._location_hint.pack(fill="x")
 
     def _switch_row(self, parent, title, desc, variable):
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -408,8 +427,8 @@ class App(ctk.CTk):
         hook = ((self.cfg.get("alert") or {}).get("webhook") or {}).get("url", "")
         self.v_hook.set(str(hook or ""))
         location = self.cfg.get("location") or {}
-        self.v_lat.set(str(location.get("lat", 29.219569)))
-        self.v_lng.set(str(location.get("lng", 119.47955)))
+        self.v_lat.set(str(location.get("lat", DEFAULT_LAT)))
+        self.v_lng.set(str(location.get("lng", DEFAULT_LNG)))
         self.v_auto.set(bool((self.cfg.get("auto_sign") or {}).get("enabled", True)))
         rules = self.cfg.get("rules") or {}
         self.v_sem.set(bool((rules.get("semantic") or {}).get("enabled", False)))
@@ -442,7 +461,7 @@ class App(ctk.CTk):
             self.logline(f"[!] {message}")
 
     def _field_error(self, key, message):
-        self._select_tab("extras" if key in ("lat", "lng", "hook") else "basic")
+        self._select_tab("extras" if key == "hook" else "basic")
         self._entries[key].set_error()
         self._feedback(message, error=True)
         return False
@@ -453,7 +472,7 @@ class App(ctk.CTk):
                 ("lat", self.v_lat, "纬度", 90),
                 ("lng", self.v_lng, "经度", 180)):
             try:
-                value = float(var.get().strip() or 0)
+                value = float(var.get().strip())
                 if not math.isfinite(value) or not -limit <= value <= limit:
                     raise ValueError
             except ValueError:
@@ -525,6 +544,8 @@ class App(ctk.CTk):
 
     # ---------- 后台动作与主线程状态 ----------
     def _busy(self):
+        if self._closing:
+            return True
         if self._task_kind is not None:
             self.logline("[!] 已有任务在运行，请等待完成或停止监控。")
             return True
@@ -537,6 +558,7 @@ class App(ctk.CTk):
         self.b_monitor.configure(state="disabled")
         self.b_login.configure(state="disabled")
         self.b_test.configure(state="disabled")
+        self.b_locate.configure(state="disabled")
         if kind == "monitor":
             self._t0 = time.monotonic()
             self._metrics["time"].configure(text="00:00:00")
@@ -551,17 +573,26 @@ class App(ctk.CTk):
         elif kind == "login":
             self.b_login.configure(text="登录中…")
             self._set_status(design.AMBER, "登录中")
+        elif kind == "location":
+            self.b_locate.configure(text="获取中…")
+            self._location_hint.configure(text="正在获取 Windows 位置…", text_color=design.TXT3)
+            self._set_status(design.AMBER, "正在定位")
         else:
             self.b_test.configure(text="发送中…")
             self._set_status(design.AMBER, "测试通知")
 
         def run():
             failed = False
+            result = None
             writer = QueueWriter(self.log_q)
             with redirect_stdout(writer), redirect_stderr(writer):
                 try:
                     result = fn(*args)
                     failed = type(result) is int and result != 0
+                except LocationError as exc:
+                    failed = True
+                    result = exc
+                    print(f"[!] {exc}")
                 except SystemExit as exc:
                     failed = exc.code not in (None, 0)
                     if failed:
@@ -572,7 +603,7 @@ class App(ctk.CTk):
                     failed = True
                     print(f"[错误] {exc}")
                     traceback.print_exc()
-            self.task_q.put((kind, failed))
+            self.task_q.put((kind, failed, result))
 
         self.worker = threading.Thread(target=run, daemon=True)
         self.worker.start()
@@ -582,13 +613,36 @@ class App(ctk.CTk):
         self._dot.configure(text_color=color)
         self._status.configure(text=status, text_color=color)
 
-    def _finish_task(self, kind, failed):
+    def _finish_task(self, kind, failed, result=None):
+        if self._closing:
+            self._task_kind = None
+            self.worker = None
+            return
         if kind == "monitor":
             self._update_timer()
             if not self._has_transcript:
                 self._transcript.configure(text="监控未能启动" if failed else "监控已结束")
             self._transcript_hint.configure(
                 text="请查看下方活动记录，调整后重试。" if failed else "点击「启动监控」开始下一次课堂。")
+        elif kind == "location":
+            if failed:
+                message = str(result) if isinstance(result, LocationError) else "获取失败，请查看活动记录或手动填写。"
+                self._location_hint.configure(text=message, text_color=design.AMBER)
+            elif isinstance(result, Location):
+                if (self.v_lat.get(), self.v_lng.get()) != self._location_request_values:
+                    self._location_hint.configure(
+                        text="坐标已手动修改，已保留当前填写。", text_color=design.TXT3)
+                else:
+                    self.v_lat.set(f"{result.lat:.6f}")
+                    self.v_lng.set(f"{result.lng:.6f}")
+                    for key in ("lat", "lng"):
+                        self._entries[key].invalid = False
+                        self._entries[key].configure(border_color=design.INPUT_BORDER)
+                    accuracy = f"，误差约 {result.accuracy_m:.0f} 米" if result.accuracy_m is not None else ""
+                    self._location_hint.configure(
+                        text=f"已获取{accuracy}。请核对后保存。",
+                        text_color=design.AMBER if result.accuracy_m is not None and result.accuracy_m > 1000 else design.TXT3)
+                    self.logline(f"[OK] 已获取 Windows 当前位置{accuracy}，请核对后保存。")
         self._task_kind = None
         self._t0 = None
         self.worker = None
@@ -597,6 +651,7 @@ class App(ctk.CTk):
             image=design.ui_icon("play", 15, design.BUTTON_TEXT))
         self.b_login.configure(state="normal", text="登录 / 刷新")
         self.b_test.configure(state="normal", text="测试推送")
+        self.b_locate.configure(state="normal", text="获取当前位置")
         if failed:
             self._set_status(design.RED, "任务异常")
         elif kind == "monitor":
@@ -658,6 +713,12 @@ class App(ctk.CTk):
             monitor.cmd_webhook_test(cfg)
 
         self._worker(run, copy.deepcopy(self.cfg), kind="webhook")
+
+    def locate(self):
+        if self._busy():
+            return
+        self._location_request_values = (self.v_lat.get(), self.v_lng.get())
+        self._worker(get_current_location, kind="location")
 
     @staticmethod
     def _valid_url(value):
@@ -783,11 +844,29 @@ class App(ctk.CTk):
         self._poll_job = self.after(100, self._poll_log)
 
     def _on_close(self):
+        if self._closing:
+            return
+        self._closing = True
         self.stop_event.set()
-        self.destroy()
+        self.b_monitor.configure(state="disabled", text="正在关闭…")
+        self.b_login.configure(state="disabled")
+        self.b_test.configure(state="disabled")
+        self.b_locate.configure(state="disabled")
+        self._set_status(design.AMBER, "正在关闭")
+        self._wait_for_monitor_close()
+
+    def _wait_for_monitor_close(self):
+        # Wait for attendance cleanup or the bounded system-location helper.
+        # Keep Tk responsive rather than abandoning a child process on exit.
+        self._close_job = None
+        if self._task_kind in ("monitor", "location") and self.worker and self.worker.is_alive():
+            self._close_job = self.after(100, self._wait_for_monitor_close)
+        else:
+            self.destroy()
 
     def destroy(self):
-        for job in (self._poll_job, self._tick_job, self._copy_job):
+        self.stop_event.set()
+        for job in (self._poll_job, self._tick_job, self._copy_job, self._close_job):
             if job:
                 self.after_cancel(job)
         super().destroy()
