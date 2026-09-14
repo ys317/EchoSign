@@ -14,7 +14,8 @@ SHA256 values in `source-lock.json`; builds check the hashes and signature again
 
 ## Build and outputs
 
-The manual **Build portable audio FFmpeg** GitHub Actions workflow builds on an
+The **Build portable audio FFmpeg** GitHub Actions workflow runs manually or on
+the dedicated `codex/ffmpeg-audio-build` branch and builds on an
 isolated `windows-2022` runner with MSYS2 MINGW64. It has read-only repository
 permission and uploads a build artifact; it does not create a software release.
 The action implementations are pinned by commit. The rolling MSYS2 package
@@ -54,8 +55,8 @@ The completed workflow produces these matched release assets:
 - `SOURCE.json` and `SHA256SUMS`: tie the executable and the corresponding source
   archive to the same verified build. Publish the source asset alongside the ZIP.
 
-`SOURCE.json` uses `version: "8.1.2"`, `tls_backend: "schannel"`,
-`binary_sha256`, `source_archive` (filename), `source_archive_sha256`, and
+`SOURCE.json` uses `version: "8.1.2-echosign-audio"`, `tls_backend: "schannel"`,
+`binary_sha256`, `source_archive` (an object containing `name` and `sha256`), and
 `configure_flags`. No executable is accepted by the packager after it changes
 following verification.
 

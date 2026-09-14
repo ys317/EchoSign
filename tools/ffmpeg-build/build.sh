@@ -36,7 +36,7 @@ configure=(
     --disable-bzlib --disable-zlib --disable-lzma --disable-iconv
     --enable-protocol=file,pipe,http,https,tcp,tls,httpproxy
     --enable-demuxer=flv,wav,aac,matroska,mov,mp3,flac,ogg
-    --enable-muxer=flv,adts,f32le,wav
+    --enable-muxer=flv,adts,pcm_f32le,wav
     --enable-decoder=aac,aac_latm,ac3,eac3,alac,flac,mp3,mp3float,opus,vorbis
     --enable-decoder=pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_u8,pcm_f32le,pcm_f64le,adpcm_swf,nellymoser,speex
     --enable-encoder=aac,pcm_f32le
