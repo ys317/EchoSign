@@ -82,8 +82,10 @@ In FFmpeg n8.1.2, `libavformat/tls_schannel.c` enables
 `tls_verify=1` and passes the expected host to `InitializeSecurityContext`.
 This also happens for numerical IP hosts. It does not take the OpenSSL path's
 numeric-host bypass. The CI verifies valid DNS and IP certificates, wrong DNS,
-wrong IP, an IP string placed only in a DNS SAN, and an untrusted issuer. Each
-rejected certificate must fail before the HTTP request is sent. A local CRL
+wrong IP and an untrusted issuer. Each rejected certificate must fail before
+the HTTP request is sent. An IP string placed only in a DNS SAN is recorded but
+not asserted: Windows CryptoAPI accepts it, public CAs do not issue such names,
+and EchoSign only connects to DNS host names. A local CRL
 server keeps the certificate tests independent of public services while still
 exercising chain-revocation verification.
 
