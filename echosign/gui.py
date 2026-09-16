@@ -24,7 +24,7 @@ import yaml
 
 from echosign import __version__, ui as design
 from echosign.location import DEFAULT_LAT, DEFAULT_LNG, Location, LocationError, get_current_location
-from echosign.ui import Entry, Switch
+from echosign.ui import Entry, Switch, TabButton
 from echosign.runtime import application_root, resource_root
 
 APP_ROOT = application_root()
@@ -104,8 +104,12 @@ class App(ctk.CTk):
         self._has_transcript = False
         self._pages = {}
         self._tabs = {}
+        self._active_tab = None
         self._entries = {}
         self._field_actions = {}
+        self._field_labels = {}
+        self._active_audio_source = "system"
+        self._monitor_ready = False
         self.v_url = ctk.StringVar()
         self.v_user = ctk.StringVar()
         self.v_pwd = ctk.StringVar()
@@ -114,6 +118,7 @@ class App(ctk.CTk):
         self.v_lng = ctk.StringVar()
         self.v_auto = ctk.BooleanVar(value=True)
         self.v_sem = ctk.BooleanVar(value=False)
+        self.v_live = ctk.BooleanVar(value=False)
         self.v_follow = ctk.BooleanVar(value=True)
 
         self._body()
@@ -121,8 +126,9 @@ class App(ctk.CTk):
         self._loading = False
         self._saved_values = self._field_values()
         for var in (self.v_url, self.v_user, self.v_pwd, self.v_hook,
-                    self.v_lat, self.v_lng, self.v_auto, self.v_sem):
+                    self.v_lat, self.v_lng, self.v_auto, self.v_sem, self.v_live):
             var.trace_add("write", self._mark_dirty)
+        self.v_live.trace_add("write", self._update_audio_mode)
         self.txt_rules.bind("<<Modified>>", self._rules_changed, add="+")
         self.txt_rules.edit_modified(False)
         self.bind("<Control-s>", lambda _: self.save_cfg())
@@ -143,6 +149,12 @@ class App(ctk.CTk):
     def _divider(parent, pady=16):
         ctk.CTkFrame(parent, height=1, fg_color=design.RAIL,
                      corner_radius=0).pack(fill="x", pady=pady)
+
+    @staticmethod
+    def _fit_wrap(label, pixels, minimum, padding):
+        width = max(minimum, int(pixels / label._get_widget_scaling()) - padding)
+        if label.cget("wraplength") != width:
+            label.configure(wraplength=width)
 
     @staticmethod
     def _button(parent, text, command, **kw):
@@ -182,9 +194,7 @@ class App(ctk.CTk):
         tabbar.grid_columnconfigure((0, 1, 2), weight=1, uniform="tabs")
         for i, (key, title) in enumerate((
                 ("basic", "课堂"), ("rules", "识别"), ("extras", "通知"))):
-            tab = self._button(
-                tabbar, title, lambda k=key: self._select_tab(k),
-                width=0, height=32, font=(design.F, 12), corner_radius=8)
+            tab = TabButton(tabbar, text=title, command=lambda k=key: self._select_tab(k))
             tab.grid(row=0, column=i, sticky="ew", padx=(3, 0) if i < 2 else 3, pady=3)
             self._tabs[key] = tab
 
@@ -211,7 +221,6 @@ class App(ctk.CTk):
                 content, fg_color=design.CARD, corner_radius=0,
                 scrollbar_fg_color=design.CARD, scrollbar_button_color=design.CARD,
                 scrollbar_button_hover_color=design.INPUT_BORDER)
-            page.grid(row=0, column=0, sticky="nsew")
             self._pages[key] = page
         self._basic_page(self._pages["basic"])
         self._rules_page(self._pages["rules"])
@@ -225,7 +234,9 @@ class App(ctk.CTk):
         caption = ctk.CTkFrame(box, fg_color="transparent", height=22)
         caption.pack(fill="x", pady=(0, 6))
         caption.pack_propagate(False)
-        self._label(caption, title, 12, design.TXT2).pack(side="left")
+        label = self._label(caption, title, 12, design.TXT2)
+        label.pack(side="left")
+        self._field_labels[key] = label
         if action:
             button = self._button(
                 caption, action[0], action[1], width=60, height=22,
@@ -239,10 +250,22 @@ class App(ctk.CTk):
 
     def _basic_page(self, page):
         self._field(page, "url", "直播网址（选填）", self.v_url,
-                    action=("打开 ↗", self.open_url), bottom=6)
-        self._label(
+                    action=("打开 ↗", self._url_action), bottom=6)
+        self.b_url = self._field_actions["url"]
+        mode = ctk.CTkFrame(page, fg_color="transparent")
+        mode.pack(fill="x", pady=(0, 5))
+        switch = Switch(mode, self.v_live)
+        switch.pack(side="right")
+        self.b_live_account = self._button(
+            mode, "换账号", lambda: self.do_live_login(switch_account=True),
+            width=56, height=22, font=(design.F, 11), text_color=design.TXT2)
+        label = self._label(mode, "后台音频", 12, design.TXT2)
+        label.pack(side="left")
+        label.bind("<Button-1>", switch.toggle)
+        self._url_hint = self._label(
             page, "仅用于快捷打开；已在浏览器播放可留空。",
-            11, design.TXT3, wraplength=244, justify="left").pack(fill="x", pady=(0, 4))
+            11, design.TXT3, wraplength=244, justify="left")
+        self._url_hint.pack(fill="x", pady=(0, 4))
         self._divider(page, (2, 12))
         self._field(page, "user", "学号", self.v_user, bottom=12)
         self.e_pwd = self._field(
@@ -316,24 +339,22 @@ class App(ctk.CTk):
         self._label(text, title, 13, design.TXT, True).pack(anchor="w")
         description = self._label(text, desc, 11, design.TXT3, justify="left", wraplength=260)
         description.pack(fill="x", pady=(3, 0))
-        text.bind("<Configure>", lambda e: description.configure(
-            wraplength=max(120, int(e.width / description._get_widget_scaling()) - 4)), add="+")
+        text.bind("<Configure>", lambda e: self._fit_wrap(description, e.width, 120, 4), add="+")
         for widget in (row, text, *text.winfo_children()):
             widget.bind("<Button-1>", track.toggle)
         return track
 
     def _select_tab(self, key):
+        if self._active_tab == key:
+            return
+        if self._active_tab is not None:
+            # CTk replays cached grid calls on DPI changes. Forget the hidden
+            # page's placement so scaling cannot make it reappear on top.
+            self._pages[self._active_tab].grid_forget()
+            self._tabs[self._active_tab].set_selected(False)
+        self._pages[key].grid(row=0, column=0, sticky="nsew")
+        self._tabs[key].set_selected(True)
         self._active_tab = key
-        for name, page in self._pages.items():
-            if name == key:
-                page.grid()
-            else:
-                page.grid_remove()
-            self._tabs[name].configure(
-                fg_color=design.TAB_SELECTED if name == key else "transparent",
-                hover_color=design.TAB_SELECTED if name == key else design.GHOST_HOVER,
-                text_color=design.TXT if name == key else design.TXT2,
-                font=(design.F, 12, "bold") if name == key else (design.F, 12))
 
 
     def _monitor_panel(self, body):
@@ -391,9 +412,8 @@ class App(ctk.CTk):
             transcript, "准备开始课堂监控", 22, design.TXT,
             wraplength=520, justify="left", height=60, anchor="nw")
         self._transcript.pack(fill="both", expand=True, padx=24, pady=(0, 8))
-        transcript.bind("<Configure>", lambda e: self._transcript.configure(
-            wraplength=max(200, int(e.width / self._transcript._get_widget_scaling()) - 52)),
-            add="+")
+        transcript.bind("<Configure>", lambda e: self._fit_wrap(self._transcript, e.width, 200, 52),
+                        add="+")
 
         head = ctk.CTkFrame(panel, fg_color="transparent")
         head.pack(fill="x", padx=34, pady=(24, 10))
@@ -422,6 +442,7 @@ class App(ctk.CTk):
 
     def _load_fields(self):
         self.v_url.set(str(self.cfg.get("live_url", "") or ""))
+        self.v_live.set(bool((self.cfg.get("live_audio") or {}).get("enabled", False)))
         self.v_user.set(self.secrets.get("skl_username", ""))
         self.v_pwd.set(self.secrets.get("skl_password", ""))
         hook = ((self.cfg.get("alert") or {}).get("webhook") or {}).get("url", "")
@@ -433,6 +454,7 @@ class App(ctk.CTk):
         rules = self.cfg.get("rules") or {}
         self.v_sem.set(bool((rules.get("semantic") or {}).get("enabled", False)))
         self.txt_rules.insert("1.0", "\n".join(str(r) for r in rules.get("strong", [])))
+        self._update_audio_mode()
 
     def _field_values(self):
         return (
@@ -440,7 +462,30 @@ class App(ctk.CTk):
             self.v_hook.get(), self.v_lat.get(), self.v_lng.get(),
             self.v_auto.get(), self.v_sem.get(),
             self.txt_rules.get("1.0", "end-1c"),
+            self.v_live.get(),
         )
+
+    def _update_audio_mode(self, *_):
+        direct = self.v_live.get()
+        self._field_labels["url"].configure(text="直播网址" if direct else "直播网址（选填）")
+        self.b_url.configure(
+            text="登录中…" if self._task_kind == "live_login" else "登录直播" if direct else "打开 ↗",
+            state="disabled" if self._closing or (direct and self._task_kind) else "normal")
+        self.b_live_account.configure(
+            state="disabled" if self._closing or self._task_kind else "normal")
+        if direct:
+            self.b_live_account.pack(side="right", padx=(0, 8))
+        else:
+            self.b_live_account.pack_forget()
+        self._url_hint.configure(text=(
+            "首次登录直播后，直接读取声音。" if direct
+            else "仅用于快捷打开；已在浏览器播放可留空。"))
+
+    def _url_action(self):
+        if self.v_live.get():
+            self.do_live_login()
+        else:
+            self.open_url()
 
     def _mark_dirty(self, *_):
         if not self._loading:
@@ -485,6 +530,7 @@ class App(ctk.CTk):
         secrets = copy.deepcopy(self.secrets)
         cfg["ui"] = {**(cfg.get("ui") or {}), "appearance": self._appearance}
         cfg["live_url"] = self.v_url.get().strip()
+        cfg.setdefault("live_audio", {})["enabled"] = bool(self.v_live.get())
         cfg.setdefault("alert", {}).setdefault("webhook", {})["url"] = self.v_hook.get().strip()
         cfg["location"] = {**(cfg.get("location") or {}), **coords}
         cfg.setdefault("auto_sign", {})["enabled"] = bool(self.v_auto.get())
@@ -559,11 +605,13 @@ class App(ctk.CTk):
         self.b_login.configure(state="disabled")
         self.b_test.configure(state="disabled")
         self.b_locate.configure(state="disabled")
+        self._update_audio_mode()
         if kind == "monitor":
             self._t0 = time.monotonic()
             self._metrics["time"].configure(text="00:00:00")
             self._set_code(None)
             self._has_transcript = False
+            self._monitor_ready = False
             self._transcript.configure(text="正在准备语音识别…", text_color=design.TXT2)
             self._transcript_hint.configure(text="初始化本地模型，请稍候。")
             self.b_monitor.configure(
@@ -573,6 +621,8 @@ class App(ctk.CTk):
         elif kind == "login":
             self.b_login.configure(text="登录中…")
             self._set_status(design.AMBER, "登录中")
+        elif kind == "live_login":
+            self._set_status(design.AMBER, "登录直播")
         elif kind == "location":
             self.b_locate.configure(text="获取中…")
             self._location_hint.configure(text="正在获取 Windows 位置…", text_color=design.TXT3)
@@ -621,7 +671,8 @@ class App(ctk.CTk):
         if kind == "monitor":
             self._update_timer()
             if not self._has_transcript:
-                self._transcript.configure(text="监控未能启动" if failed else "监控已结束")
+                self._transcript.configure(text=(
+                    "监控已中断" if self._monitor_ready else "监控未能启动") if failed else "监控已结束")
             self._transcript_hint.configure(
                 text="请查看下方活动记录，调整后重试。" if failed else "点击「启动监控」开始下一次课堂。")
         elif kind == "location":
@@ -652,6 +703,7 @@ class App(ctk.CTk):
         self.b_login.configure(state="normal", text="登录 / 刷新")
         self.b_test.configure(state="normal", text="测试推送")
         self.b_locate.configure(state="normal", text="获取当前位置")
+        self._update_audio_mode()
         if failed:
             self._set_status(design.RED, "任务异常")
         elif kind == "monitor":
@@ -667,9 +719,15 @@ class App(ctk.CTk):
             self.start_monitor()
 
     def start_monitor(self):
-        if self._busy() or not self.save_cfg():
+        if self._busy():
+            return
+        if self.v_live.get() and not self._valid_url(self.v_url.get().strip()):
+            self._field_error("url", "后台音频需要填写直播页面网址")
+            return
+        if not self.save_cfg():
             return
         self.stop_event.clear()
+        self._active_audio_source = "live" if self.v_live.get() else "system"
 
         def run(cfg):
             from echosign import monitor
@@ -697,6 +755,23 @@ class App(ctk.CTk):
             return browser.login()
 
         self._worker(run, kind="login")
+
+    def do_live_login(self, switch_account=False):
+        if self._busy():
+            return
+        if not self._valid_url(self.v_url.get().strip()):
+            self._field_error("url", "请先填写直播页面网址")
+            return
+        if not self.save_cfg():
+            return
+        self.stop_event.clear()
+
+        def run(url):
+            from echosign.live import login_live
+
+            return login_live(url, self.stop_event, switch_account=switch_account)
+
+        self._worker(run, self.v_url.get().strip(), kind="live_login")
 
     def test_webhook(self):
         if self._busy():
@@ -781,45 +856,80 @@ class App(ctk.CTk):
         self.log_q.put(s)
 
     def _append_log(self, line):
-        line = line.strip()
-        if not line:
-            return
-        if line.startswith("…识别中:"):
-            self._has_transcript = True
-            self._transcript_hint.configure(text="")
-            self._transcript.configure(text=line.partition(":")[2].strip(), text_color=design.TXT2)
-            return  # 中间识别结果只更新预览，不淹没最终日志。
-        if line.startswith("[ASR "):
-            self._has_transcript = True
-            self._transcript_hint.configure(text="")
-            self._transcript.configure(text=line.partition("]")[2].strip(), text_color=design.TXT)
-        if (code := re.search(r"签到码[:：]\s*([0-9]{4})(?!\d)", line)):
-            self._set_code(code.group(1))
-        if "ASR 就绪" in line and self._task_kind == "monitor" and not self.stop_event.is_set():
-            self._set_status(design.GREEN, "监控中")
-            if not self._has_transcript:
-                self._transcript.configure(text="等待课堂声音…", text_color=design.TXT2)
-                self._transcript_hint.configure(text="正在接收电脑播放的声音。")
-        if line.startswith("[错误]") or "Traceback" in line:
-            tag = "error"
-        elif line.startswith(("[!]", "[warn]")):
-            tag = "warn"
-        elif line.startswith("[OK]") or "签到提醒" in line:
-            tag = "success"
-        elif line.startswith("[ASR "):
-            tag = "asr"
-        else:
-            tag = "info"
-        display_line = re.sub(r"^\[(?:ASR [^\]]+|i|OK)\]\s*", "", line)
+        self._append_logs((line,))
+
+    def _show_log_transcript(self, text, color, hint):
+        # 读取控件的当前值，启动、停止或重连后的状态也能正确覆盖。
+        changes = {}
+        if self._transcript.cget("text") != text:
+            changes["text"] = text
+        if self._transcript.cget("text_color") != color:
+            changes["text_color"] = color
+        if changes:
+            self._transcript.configure(**changes)
+        if self._transcript_hint.cget("text") != hint:
+            self._transcript_hint.configure(text=hint)
+
+    def _append_logs(self, lines):
+        segments = []
+        preview = None
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("…识别中:"):
+                self._has_transcript = True
+                preview = (line.partition(":")[2].strip(), design.TXT2, "")
+                continue  # 同一批中间结果只显示最新内容，不写入最终日志。
+            if line.startswith("[ASR "):
+                self._has_transcript = True
+                preview = (line.partition("]")[2].strip(), design.TXT, "")
+            if (code := re.search(r"签到码[:：]\s*([0-9]{4})(?!\d)", line)):
+                self._set_code(code.group(1))
+            if "ASR 就绪" in line and self._task_kind == "monitor" and not self.stop_event.is_set():
+                self._monitor_ready = True
+                self._set_status(design.GREEN, "监控中")
+                if not self._has_transcript:
+                    preview = ("等待课堂声音…", design.TXT2,
+                               "正在接收直播音频，无需网页播放。" if self._active_audio_source == "live"
+                               else "正在接收电脑播放的声音。")
+            if (line.startswith("[i] 直播状态:") and self._task_kind == "monitor"
+                    and not self.stop_event.is_set()):
+                reconnecting = "正在重连" in line
+                self._set_status(design.AMBER, "正在重连" if reconnecting else "正在连接")
+                self._has_transcript = False
+                preview = ("直播暂时中断，正在重新连接…" if reconnecting else "正在连接直播…",
+                           design.TXT2,
+                           "恢复收到声音后会继续识别。" if reconnecting else "收到直播声音后开始识别。")
+            if line.startswith("[错误]") or "Traceback" in line:
+                tag = "error"
+            elif line.startswith(("[!]", "[warn]")):
+                tag = "warn"
+            elif line.startswith("[OK]") or "签到提醒" in line:
+                tag = "success"
+            elif line.startswith("[ASR "):
+                tag = "asr"
+            else:
+                tag = "info"
+            display_line = re.sub(r"^\[(?:ASR [^\]]+|i|OK)\]\s*", "", line)
+            segments.extend((time.strftime("%H:%M:%S") + "  ", ("time",), display_line + "\n", (tag,)))
+        if segments:
+            self._write_log_batch(segments)
+        if preview is not None:
+            self._show_log_transcript(*preview)
+
+    def _write_log_batch(self, segments):
         self.log.configure(state="normal")
-        self.log.insert("end", time.strftime("%H:%M:%S") + "  ", ("time",))
-        self.log.insert("end", display_line + "\n", (tag,))
-        excess = int(self.log.index("end-1c").split(".")[0]) - 1 - MAX_LOG_LINES
-        if excess > 0:
-            self.log.delete("1.0", f"{excess + 1}.0")
-        if self.v_follow.get():
-            self.log.see("end")
-        self.log.configure(state="disabled")
+        try:
+            # CTk 的包装方法只接收一段文本；Tk Text 支持一次插入多段及各自标签。
+            self.log._textbox.insert("end", *segments)
+            excess = int(self.log.index("end-1c").split(".")[0]) - 1 - MAX_LOG_LINES
+            if excess > 0:
+                self.log.delete("1.0", f"{excess + 1}.0")
+            if self.v_follow.get():
+                self.log.yview_moveto(1.0)
+        finally:
+            self.log.configure(state="disabled")
         self._empty_log.place_forget()
 
     def clear_log(self):
@@ -830,18 +940,33 @@ class App(ctk.CTk):
         self._empty_log.place(relx=0.5, rely=0.5, anchor="center")
 
     def _poll_log(self):
-        for _ in range(160):  # 批量处理有上限，避免大量输出阻塞按钮和窗口。
-            try:
-                self._append_log(self.log_q.get_nowait())
-            except queue.Empty:
-                break
-        # 先处理完这一任务的输出，再切回空闲状态。
+        # 留出约 2 ms 一次提交文本和预览，避免逐条 Tk 重绘占满事件循环。
+        deadline = time.perf_counter() + 0.008
+
+        def pending_lines():
+            for count in range(160):
+                if count and time.perf_counter() >= deadline:
+                    break
+                try:
+                    yield self.log_q.get_nowait()
+                except queue.Empty:
+                    break
+
+        self._append_logs(pending_lines())
+        # 完成通知入队后再检查一次日志，覆盖工作线程恰好写入最后一条的竞态。
         if self.log_q.empty():
-            try:
-                self._finish_task(*self.task_q.get_nowait())
-            except queue.Empty:
-                pass
-        self._poll_job = self.after(100, self._poll_log)
+            completion = getattr(self, "_log_completion", None)
+            if completion is None:
+                try:
+                    completion = self.task_q.get_nowait()
+                except queue.Empty:
+                    pass
+            self._log_completion = completion
+            if completion is not None and self.log_q.empty():
+                self._log_completion = None
+                self._finish_task(*completion)
+        # 有积压时先让出事件循环，随后尽快继续；空闲时维持低频轮询。
+        self._poll_job = self.after(10 if not self.log_q.empty() else 100, self._poll_log)
 
     def _on_close(self):
         if self._closing:
@@ -852,6 +977,8 @@ class App(ctk.CTk):
         self.b_login.configure(state="disabled")
         self.b_test.configure(state="disabled")
         self.b_locate.configure(state="disabled")
+        self.b_url.configure(state="disabled")
+        self.b_live_account.configure(state="disabled")
         self._set_status(design.AMBER, "正在关闭")
         self._wait_for_monitor_close()
 
@@ -859,7 +986,7 @@ class App(ctk.CTk):
         # Wait for attendance cleanup or the bounded system-location helper.
         # Keep Tk responsive rather than abandoning a child process on exit.
         self._close_job = None
-        if self._task_kind in ("monitor", "location") and self.worker and self.worker.is_alive():
+        if self._task_kind in ("monitor", "location", "live_login") and self.worker and self.worker.is_alive():
             self._close_job = self.after(100, self._wait_for_monitor_close)
         else:
             self.destroy()

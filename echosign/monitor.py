@@ -39,7 +39,7 @@ def cmd_devices() -> None:
 def make_engine(cfg: dict) -> StreamingASR:
     a = cfg.get("asr", {})
     return StreamingASR(a.get("model_dir", "models/sherpa-onnx-streaming-zipformer-zh-14M"),
-                        int(a.get("num_threads", 4)), a.get("provider", "cpu"),
+                        int(a.get("num_threads", 1)), a.get("provider", "cpu"),
                         hotwords=a.get("hotwords") or [],
                         hotwords_score=float(a.get("hotwords_score", 1.5)),
                         decoding_method=a.get("decoding_method") or None)
@@ -154,6 +154,8 @@ def run_pipeline(chunks, asr, matchers, alerter, watcher: SignInWatcher | None =
 
 def cmd_run(cfg: dict, stop=None) -> None:
     stop = stop if stop is not None else threading.Event()
+    if (cfg.get("live_audio") or {}).get("enabled", False):
+        return cmd_run_live(cfg, stop)
     chunk = float(cfg.get("chunk_seconds", 0.25))
     src = LoopbackSource(cfg.get("device") or None, chunk)
     print(f"[i] 正在监听输出设备: {src.speaker_name} (内录环回)")
@@ -169,6 +171,138 @@ def cmd_run(cfg: dict, stop=None) -> None:
         print("[i] ASR 就绪, Ctrl+C 停止\n")
         with closing(src.chunks(stop=stop)) as chunks:
             run_pipeline(chunks, asr, matchers, alerter, watcher, stop=stop)
+    except KeyboardInterrupt:
+        stop.set()
+        print("\n已停止")
+    finally:
+        if auto is not None:
+            auto.close()
+
+
+def cmd_run_live(cfg: dict, stop=None) -> None:
+    """Read a single live stream without a playing browser or loopback capture."""
+    from echosign.live import LiveClient, LiveEnded, LiveError
+    from echosign.media import FFmpegAudioSource, MediaError, find_ffmpeg
+
+    stop = stop if stop is not None else threading.Event()
+    if stop.is_set():
+        return
+    executable = find_ffmpeg()
+    auto = None
+    asr = watcher = None
+    failures = auth_failures = 0
+    outage_started = None
+    last_error = "直播连接暂时不可用。"
+    retry_delays = (2.0, 5.0, 10.0, 20.0, 30.0)
+    recovery_seconds = 120.0
+    stable_seconds = 30.0
+
+    def recovery_expired():
+        return outage_started is not None and time.monotonic() - outage_started >= recovery_seconds
+
+    def recovery_failed():
+        return MediaError(f"直播音频在两分钟内未能恢复，已停止。{last_error}", kind="terminal")
+
+    try:
+        with LiveClient(str(cfg.get("live_url") or ""), cfg) as client:
+            print("[i] 直播状态: 正在连接")
+            while not stop.is_set():
+                if recovery_expired():
+                    raise recovery_failed() from None
+                try:
+                    # Refresh only this lesson's playback credentials. API
+                    # outages follow the same bounded recovery as media outages.
+                    stream = client.resolve()
+                    if stop.is_set():
+                        return
+                    if recovery_expired():
+                        raise recovery_failed() from None
+                    if asr is None:
+                        print("[i] 正在准备直播音频识别，无需网页播放")
+                        alerter = make_alerter(cfg)
+                        matchers = build_matchers(cfg)
+                        asr = make_engine(cfg)
+                        if stop.is_set():
+                            return
+                        auto = make_auto_signer(cfg, alerter, stop)
+                        watcher = make_watcher(cfg, alerter, auto, stop)
+                    source = FFmpegAudioSource(
+                        stream.url, headers=stream.headers,
+                        chunk_seconds=float(cfg.get("chunk_seconds", 0.25)), executable=executable)
+
+                    def live_chunks():
+                        nonlocal failures, auth_failures, outage_started
+                        first = True
+                        first_audio_at = None
+                        received_seconds = 0.0
+                        stable = False
+                        gaps = 0
+                        with closing(source.chunks(stop)) as chunks:
+                            for chunk in chunks:
+                                if stop.is_set():
+                                    return
+                                if recovery_expired():
+                                    raise recovery_failed() from None
+                                if source.discontinuities != gaps:
+                                    # Audio was skipped to catch up with the live
+                                    # stream. Fragments on either side of the gap
+                                    # must not be joined into a sign-in code.
+                                    gaps = source.discontinuities
+                                    watcher.discard_partial()
+                                    asr.restart()
+                                    print(f"[!] 直播音频积压，已跳过约 {source.skipped_seconds:.0f} 秒，继续识别当前声音。")
+                                if first:
+                                    first_audio_at = time.monotonic()
+                                    auth_failures = 0
+                                    print("[i] ASR 就绪 · 正在接收直播音频")
+                                    first = False
+                                received_seconds += len(chunk) / SAMPLE_RATE
+                                # One or two successful chunks must not renew
+                                # the budget of a continuously flapping stream.
+                                if (not stable and received_seconds >= stable_seconds
+                                        and time.monotonic() - first_audio_at >= stable_seconds):
+                                    failures = 0
+                                    outage_started = None
+                                    stable = True
+                                yield chunk
+                        if not stop.is_set():
+                            # A dropped connection must not turn an incomplete
+                            # digit prefix into a finalized attendance code.
+                            raise MediaError("直播音频连接已结束")
+
+                    with closing(live_chunks()) as chunks:
+                        run_pipeline(chunks, asr, matchers, alerter, watcher, stop=stop)
+                    break
+                except LiveEnded:
+                    if not stop.is_set():
+                        print("[i] 本节直播已结束，监控已停止。")
+                    break
+                except (MediaError, LiveError) as exc:
+                    if stop.is_set():
+                        break
+                    if not exc.retryable:
+                        raise
+                    if watcher is not None:
+                        watcher.discard_partial()
+                    if asr is not None:
+                        asr.restart()
+                    if getattr(exc, "kind", "") == "auth":
+                        auth_failures += 1
+                    if auth_failures >= 2:
+                        raise MediaError("直播授权无法刷新，请点击“登录直播”后重试。", kind="terminal") from None
+                    last_error = str(exc)
+                    now = time.monotonic()
+                    if outage_started is None:
+                        outage_started = now
+                    failures += 1
+                    if recovery_expired():
+                        raise recovery_failed() from None
+                    delay = min(retry_delays[min(failures - 1, len(retry_delays) - 1)],
+                                recovery_seconds - (now - outage_started))
+                    print("[i] 直播状态: 正在重连")
+                    print(f"[!] {last_error} {delay:g} 秒后重试（连续第 {failures} 次）。")
+                    if stop.wait(delay):
+                        break
     except KeyboardInterrupt:
         stop.set()
         print("\n已停止")

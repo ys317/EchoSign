@@ -1,10 +1,13 @@
 """Portable dependencies must resolve without another installation or download."""
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+import numpy as np
 
 from echosign import runtime
 
@@ -51,6 +54,69 @@ class RuntimeTests(unittest.TestCase):
                 patch.object(sys, "frozen", True, create=True):
             with self.assertRaisesRegex(RuntimeError, "完整解压"):
                 runtime.semantic_model_options(runtime.SEMANTIC_MODEL)
+
+
+class FFmpegRuntimeTests(unittest.TestCase):
+    VERSION = b"ffmpeg version 8.1.2-full_build-www.gyan.dev Copyright FFmpeg developers\n"
+    PROTOCOLS = b"Supported file protocols:\nInput:\nfile\npipe\nhttp\nhttps\ntcp\ntls\nOutput:\npipe\n"
+
+    def results(self, decoded: bytes, protocols: bytes | None = None):
+        return [subprocess.CompletedProcess([], 0, stdout=output, stderr=b"")
+                for output in (self.VERSION, protocols or self.PROTOCOLS, b"encoded-aac", decoded)]
+
+    def test_audio_check_exercises_conversion_without_network_or_console(self):
+        import io
+        import wave
+
+        tone = (0.1 * np.sin(2 * np.pi * 440 * np.arange(4000) / 16000)).astype("<f4")
+        with patch.object(runtime.subprocess, "run", side_effect=self.results(tone.tobytes())) as run:
+            result = runtime.check_ffmpeg_runtime("ffmpeg.exe")
+        self.assertEqual(result["sample_rate"], 16000)
+        self.assertEqual(result["channels"], 1)
+        self.assertEqual(result["decoded_samples"], 4000)
+        self.assertEqual(result["version"], "8.1.2-full_build-www.gyan.dev")
+        calls = run.call_args_list
+        with wave.open(io.BytesIO(calls[2].kwargs["input"]), "rb") as original:
+            self.assertEqual(original.getframerate(), 48000)
+            self.assertEqual(original.getnchannels(), 2)
+        for call in calls[2:]:
+            arguments = call.args[0]
+            self.assertEqual(arguments[arguments.index("-protocol_whitelist") + 1], "pipe")
+            self.assertEqual(arguments[arguments.index("-i") + 1], "pipe:0")
+        for call in calls:
+            self.assertLessEqual(call.kwargs["timeout"], 20)
+            if sys.platform == "win32":
+                self.assertTrue(call.kwargs["creationflags"] & subprocess.CREATE_NO_WINDOW)
+
+    def test_output_https_cannot_substitute_for_missing_input_protocol(self):
+        protocols = b"Input:\nfile\npipe\nhttp\ntcp\ntls\nOutput:\nhttps\npipe\n"
+        with patch.object(runtime.subprocess, "run", side_effect=self.results(b"", protocols)) as run:
+            with self.assertRaisesRegex(RuntimeError, "https"):
+                runtime.check_ffmpeg_runtime("ffmpeg.exe")
+        self.assertEqual(run.call_count, 2)
+
+    def test_invalid_or_silent_audio_does_not_pass_runtime_check(self):
+        cases = (b"", b"partial", np.zeros(4000, dtype="<f4").tobytes(),
+                 np.full(4000, np.nan, dtype="<f4").tobytes(),
+                 np.full(9000, 0.1, dtype="<f4").tobytes())
+        for decoded in cases:
+            with self.subTest(bytes=len(decoded)), \
+                    patch.object(runtime.subprocess, "run", side_effect=self.results(decoded)):
+                with self.assertRaisesRegex(RuntimeError, "FFmpeg"):
+                    runtime.check_ffmpeg_runtime("ffmpeg.exe")
+
+    def test_unlaunchable_binary_reports_runtime_failure(self):
+        with patch.object(runtime.subprocess, "run", side_effect=FileNotFoundError("missing binary")):
+            with self.assertRaisesRegex(RuntimeError, "FFmpeg 离线音频检查失败"):
+                runtime.check_ffmpeg_runtime("missing-ffmpeg.exe")
+
+    def test_build_requires_verified_ffmpeg_bundle_before_running_any_preparation_command(self):
+        from tools import release
+
+        with tempfile.TemporaryDirectory() as temporary, patch.object(release.subprocess, "run") as run:
+            with self.assertRaisesRegex(RuntimeError, "FFmpeg bundle is missing"):
+                release.prepare_ffmpeg(Path(temporary) / "missing.zip")
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

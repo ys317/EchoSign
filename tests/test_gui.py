@@ -45,7 +45,12 @@ class GuiTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        for job in cls.app.tk.splitlist(cls.app.tk.call("after", "info")):
+            # Cancel timers without deleting Tcl commands owned by child widgets.
+            cls.app.tk.call("after", "cancel", job)
         cls.app.destroy()
+        ui.ctk.AppearanceModeTracker.update_loop_running = False
+        ui.ctk.ScalingTracker.update_loop_running = False
         ui.CONFIG, ui.SECRETS = cls.original_paths
         cls.temp.cleanup()
 
@@ -123,6 +128,79 @@ class GuiTests(unittest.TestCase):
             self.app.start_monitor()
         self.assertEqual(worker.call_args.kwargs["kind"], "monitor")
         self.assertEqual(worker.call_args.args[1]["live_url"], "")
+
+    def test_background_audio_requires_a_url_and_remembers_the_mode(self):
+        self.app.v_live.set(True)
+        self.app.v_url.set("")
+        with patch.object(self.app, "_worker") as worker:
+            self.app.start_monitor()
+            worker.assert_not_called()
+        self.assertEqual(self.app._active_tab, "basic")
+        self.assertIn("需要填写", self.app._save_state.cget("text"))
+        self.app.v_url.set("https://course.hdu.edu.cn/#/play-center?courseId=123&target=live")
+        with patch.object(self.app, "_worker", return_value=True) as worker:
+            self.app.start_monitor()
+        self.assertTrue(worker.call_args.args[1]["live_audio"]["enabled"])
+        self.assertEqual(self.app._active_audio_source, "live")
+        self.assertTrue(yaml.safe_load(ui.CONFIG.read_text(encoding="utf-8"))["live_audio"]["enabled"])
+
+    def test_url_action_matches_the_selected_audio_mode(self):
+        with patch.object(self.app, "do_live_login") as login, patch.object(self.app, "open_url") as open_url:
+            self.app.v_live.set(True)
+            self.app._url_action()
+            login.assert_called_once()
+            open_url.assert_not_called()
+            self.assertEqual(self.app.b_url.cget("text"), "登录直播")
+            self.app.v_live.set(False)
+            self.app._url_action()
+            open_url.assert_called_once()
+            self.assertEqual(self.app.b_url.cget("text"), "打开 ↗")
+
+    def test_background_audio_login_is_disabled_while_monitoring(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.app.v_live.set(True)
+        self.app._worker(lambda: release.wait(2), kind="monitor")
+        self.assertEqual(self.app.b_url.cget("state"), "disabled")
+        self.assertEqual(self.app.b_live_account.cget("state"), "disabled")
+        with patch.object(self.app, "save_cfg") as save:
+            self.app.do_live_login()
+            save.assert_not_called()
+        release.set()
+        self.pump_until(lambda: self.app._task_kind is None)
+        self.assertEqual(self.app.b_url.cget("state"), "normal")
+        self.assertEqual(self.app.b_live_account.cget("state"), "normal")
+
+    def test_live_account_switch_requests_a_separate_manual_login(self):
+        url = "https://course.hdu.edu.cn/#/play-center?courseId=123&target=live"
+        self.app.v_live.set(True)
+        self.app.v_url.set(url)
+        with patch("echosign.live.login_live", return_value=0) as login:
+            self.app.b_live_account.invoke()
+            self.pump_until(lambda: self.app._task_kind is None)
+        login.assert_called_once_with(url, self.app.stop_event, switch_account=True)
+
+    def test_live_reconnect_clears_partial_preview_and_keeps_confirmed_code(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.app._active_audio_source = "live"
+        self.app._worker(lambda: release.wait(2), kind="monitor")
+        self.app._append_log("[i] ASR 就绪 · 正在接收直播音频")
+        self.app._append_log("…识别中: 签到码一二")
+        self.app._set_code("7538")
+        self.app._append_log("[i] 直播状态: 正在重连")
+        self.assertEqual(self.app._status.cget("text"), "正在重连")
+        self.assertNotIn("签到码一二", self.app._transcript.cget("text"))
+        self.assertEqual(self.app._code, "7538")
+        self.assertFalse(self.app._has_transcript)
+        self.app._append_log("[i] ASR 就绪 · 正在接收直播音频")
+        self.assertEqual(self.app._status.cget("text"), "监控中")
+        self.app.stop_monitor()
+        self.app._append_log("[i] 直播状态: 正在重连")
+        self.app._append_log("[i] ASR 就绪 · 正在接收直播音频")
+        self.assertEqual(self.app._status.cget("text"), "正在停止")
+        release.set()
+        self.pump_until(lambda: self.app._task_kind is None)
 
     def test_location_runs_in_background_and_is_applied_on_main_thread(self):
         original = ui.CONFIG.read_bytes(), ui.SECRETS.read_bytes()
@@ -386,6 +464,191 @@ class GuiTests(unittest.TestCase):
             self.assertEqual(self.app.b_monitor.cget("state"), "normal")
         finally:
             self.app.toggle_theme()
+
+
+    def poll_log_once(self):
+        if self.app._poll_job:
+            self.app.after_cancel(self.app._poll_job)
+            self.app._poll_job = None
+        self.app._poll_log()
+
+    def test_log_burst_coalesces_preview_and_skips_identical_redraws(self):
+        self.app._show_log_transcript("之前的内容", ui.design.TXT2, "等待下一句")
+        for i in range(40):
+            self.app.logline(f"…识别中: 课堂内容 {i}")
+        with patch.object(ui.time, "perf_counter", return_value=0), \
+                patch.object(self.app._transcript, "configure", wraps=self.app._transcript.configure) as preview, \
+                patch.object(self.app._transcript_hint, "configure", wraps=self.app._transcript_hint.configure) as hint:
+            self.poll_log_once()
+            self.assertEqual(self.app._transcript.cget("text"), "课堂内容 39")
+            self.assertEqual(self.app.log.get("1.0", "end-1c"), "")
+            self.assertEqual(preview.call_count, 1)
+            self.assertEqual(hint.call_count, 1)
+            preview.reset_mock()
+            hint.reset_mock()
+            self.app.logline("…识别中: 课堂内容 39")
+            self.poll_log_once()
+            preview.assert_not_called()
+            hint.assert_not_called()
+            self.app.logline("[ASR 12:00:00] 课堂内容 39")
+            self.poll_log_once()
+            self.assertEqual(self.app._transcript.cget("text_color"), ui.design.TXT)
+            self.assertEqual(preview.call_count, 1)
+            preview.reset_mock()
+            self.app.logline("[ASR 12:00:01] 课堂内容 39")
+            self.poll_log_once()
+            preview.assert_not_called()
+        self.assertEqual(len(self.app.log.get("1.0", "end-1c").splitlines()), 2)
+
+    def test_log_burst_preserves_final_records_codes_and_completion_order(self):
+        messages = [
+            "[ASR 12:00:00] 第一条最终识别",
+            "…识别中: 不应写入活动记录",
+            "[错误] test failure",
+            "*** 签到提醒 [code] 签到码: 0123",
+            "*** 签到提醒 [code] 签到码: 4567",
+            "[ASR 12:00:01] 第二条最终识别",
+        ]
+        for message in messages:
+            self.app.logline(message)
+        self.app.task_q.put(("monitor", True, None))
+        completed = []
+
+        def finish(*result):
+            completed.append((result, self.app.log.get("1.0", "end-1c"), self.app._code))
+
+        with patch.object(ui.time, "perf_counter", return_value=0), \
+                patch.object(self.app, "_set_code", wraps=self.app._set_code) as codes, \
+                patch.object(self.app, "_finish_task", side_effect=finish):
+            self.poll_log_once()
+        self.assertEqual([call.args for call in codes.call_args_list], [("0123",), ("4567",)])
+        self.assertEqual(len(completed), 1)
+        result, history, code = completed[0]
+        self.assertEqual(result, ("monitor", True, None))
+        self.assertEqual(code, "4567")
+        self.assertEqual([line[10:] for line in history.splitlines()], [
+            "第一条最终识别", "[错误] test failure",
+            "*** 签到提醒 [code] 签到码: 0123", "*** 签到提醒 [code] 签到码: 4567",
+            "第二条最终识别",
+        ])
+        self.assertIn("asr", self.app.log.tag_names("1.10"))
+        self.assertIn("error", self.app.log.tag_names("2.10"))
+        self.assertIn("success", self.app.log.tag_names("3.10"))
+        self.assertEqual(self.app._transcript.cget("text"), "第二条最终识别")
+
+    def test_log_poll_yields_at_time_budget_before_task_completion(self):
+        for i in range(20):
+            self.app.logline(f"[i] timed-event-{i:02d}")
+        self.app.task_q.put(("monitor", False, None))
+        with patch.object(ui.time, "perf_counter", side_effect=[0, 0.009]), \
+                patch.object(self.app, "after", wraps=self.app.after) as schedule, \
+                patch.object(self.app, "_finish_task") as finish:
+            self.poll_log_once()
+            finish.assert_not_called()
+        self.assertEqual(self.app.log_q.qsize(), 19)
+        self.assertEqual(schedule.call_args.args[0], 10)
+        self.assertEqual(len(self.app.log.get("1.0", "end-1c").splitlines()), 1)
+        with patch.object(ui.time, "perf_counter", return_value=0), \
+                patch.object(self.app, "_finish_task") as finish:
+            self.poll_log_once()
+            finish.assert_called_once_with("monitor", False, None)
+
+    def test_log_poll_also_limits_the_number_of_fast_records(self):
+        for i in range(1000):
+            self.app.logline(f"[i] queued-event-{i:04d}")
+        with patch.object(ui.time, "perf_counter", return_value=0), \
+                patch.object(self.app, "after", wraps=self.app.after) as schedule:
+            self.poll_log_once()
+        retained = len(self.app.log.get("1.0", "end-1c").splitlines())
+        self.assertGreater(retained, 0)
+        self.assertLessEqual(retained, 160)
+        self.assertEqual(retained + self.app.log_q.qsize(), 1000)
+        self.assertEqual(schedule.call_args.args[0], 10)
+
+    def test_completion_waits_for_log_written_during_the_queue_check(self):
+        result = ("monitor", True, "synthetic failure")
+
+        def complete_with_tail():
+            self.app.logline("[错误] final worker message")
+            return result
+
+        with patch.object(self.app.task_q, "get_nowait", side_effect=complete_with_tail) as completion, \
+                patch.object(self.app, "_finish_task") as finish:
+            self.poll_log_once()
+            finish.assert_not_called()
+            self.assertFalse(self.app.log_q.empty())
+            self.poll_log_once()
+            finish.assert_called_once_with(*result)
+            completion.assert_called_once()
+        self.assertIn("final worker message", self.app.log.get("1.0", "end-1c"))
+
+    def test_log_batch_keeps_reconnect_after_earlier_partial_preview(self):
+        self.app._task_kind = "monitor"
+        self.addCleanup(setattr, self.app, "_task_kind", None)
+        self.app._active_audio_source = "live"
+        self.app._set_code("7538")
+        self.app.logline("…识别中: 尚未完成的内容")
+        self.app.logline("[i] 直播状态: 正在重连")
+        with patch.object(ui.time, "perf_counter", return_value=0):
+            self.poll_log_once()
+        self.assertFalse(self.app._has_transcript)
+        self.assertEqual(self.app._status.cget("text"), "正在重连")
+        self.assertNotIn("尚未完成", self.app._transcript.cget("text"))
+        self.assertEqual(self.app._code, "7538")
+        self.app.logline("[i] ASR 就绪 · 正在接收直播音频")
+        self.app.logline("[ASR 12:00:01] 恢复后的最终内容")
+        with patch.object(ui.time, "perf_counter", return_value=0):
+            self.poll_log_once()
+        self.assertTrue(self.app._has_transcript)
+        self.assertEqual(self.app._status.cget("text"), "监控中")
+        self.assertEqual(self.app._transcript.cget("text"), "恢复后的最终内容")
+
+    def test_log_batch_trims_and_scrolls_once_and_respects_follow(self):
+        self.app.v_follow.set(True)
+        for i in range(45):
+            self.app.logline(f"[i] batch-event-{i:03d}")
+        with patch.object(ui, "MAX_LOG_LINES", 20), \
+                patch.object(ui.time, "perf_counter", return_value=0), \
+                patch.object(self.app.log._textbox, "insert", wraps=self.app.log._textbox.insert) as insert, \
+                patch.object(self.app.log, "delete", wraps=self.app.log.delete) as trim, \
+                patch.object(self.app.log, "yview_moveto", wraps=self.app.log.yview_moveto) as scroll:
+            self.poll_log_once()
+            self.assertEqual(insert.call_count, 1)
+            self.assertEqual(trim.call_count, 1)
+            scroll.assert_called_once_with(1.0)
+            lines = self.app.log.get("1.0", "end-1c").splitlines()
+            self.assertEqual(len(lines), 20)
+            self.assertIn("batch-event-025", lines[0])
+            self.assertIn("batch-event-044", lines[-1])
+            self.assertEqual(self.app.log.cget("state"), "disabled")
+            self.app.v_follow.set(False)
+            self.addCleanup(self.app.v_follow.set, True)
+            scroll.reset_mock()
+            self.app.logline("[i] keep the current scroll position")
+            self.poll_log_once()
+            scroll.assert_not_called()
+
+    def test_stop_button_is_serviced_while_logs_are_backlogged(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.app._worker(lambda: release.wait(3), kind="monitor")
+        for i in range(1000):
+            self.app.logline(f"[i] busy-event-{i:04d}")
+        self.app.after_cancel(self.app._poll_job)
+        self.app._poll_job = self.app.after(0, self.app._poll_log)
+        pending_at_stop = []
+
+        def click_stop():
+            self.app.b_monitor.invoke()
+            pending_at_stop.append(self.app.log_q.qsize())
+
+        self.app.after(0, click_stop)
+        self.pump_until(lambda: pending_at_stop)
+        self.assertTrue(self.app.stop_event.is_set())
+        self.assertGreater(pending_at_stop[0], 0)
+        self.assertEqual(self.app._status.cget("text"), "正在停止")
+        release.set()
+        self.pump_until(lambda: self.app._task_kind is None)
 
 
 if __name__ == "__main__":

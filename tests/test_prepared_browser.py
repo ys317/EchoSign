@@ -227,13 +227,33 @@ while not (p/'stop.json').exists():
 """
         session = _BrowserSession(threading.Event(), 5)
         self.addCleanup(session.close)
+        child_output = None
+        original_popen = subprocess.Popen
+
+        def start_child(*args, **kwargs):
+            nonlocal child_output
+            child_output = kwargs["stdout"]
+            return original_popen(*args, **kwargs)
+
         with patch("echosign.attendance.browser_command", side_effect=lambda *args: [
-                sys.executable, "-X", "utf8", "-c", script, args[-1]]):
-            session.open()
-            process, folder = session.proc, session.directory
-            self.assertEqual(session.submit("1234", time.time()).message, "1")
-            self.assertEqual(session.submit("1234", time.time()).message, "2")
-            session.close()
+                sys.executable, "-X", "utf8", "-c", script, args[-1]]), \
+                patch("echosign.attendance.subprocess.Popen", side_effect=start_child):
+            try:
+                session.open()
+                process, folder = session.proc, session.directory
+                self.assertEqual(session.submit("1234", time.time()).message, "1")
+                self.assertEqual(session.submit("1234", time.time()).message, "2")
+                session.close()
+            except Exception as exc:
+                # Preserve the fake child's traceback before cleanup closes its log.
+                output = "(no child output)"
+                if child_output is not None and not child_output.closed:
+                    child_output.seek(0)
+                    output = child_output.read().decode("utf-8", errors="replace") or output
+                returncode = session.proc.poll() if session.proc is not None else None
+                raise AssertionError(
+                    f"Offline fake child returncode={returncode}; stdout/stderr:\n{output}"
+                ) from exc
         self.assertIsNotNone(process.poll())
         self.assertFalse(folder.exists())
 

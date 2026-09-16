@@ -1,6 +1,6 @@
 """Build and publish a verified, self-contained Windows release.
 
-Usage: python tools/release.py build
+Usage: python tools/release.py build --ffmpeg-bundle <verified-audio-build.zip>
        python tools/release.py publish --notes <release-notes.md>
 """
 from __future__ import annotations
@@ -22,13 +22,15 @@ import time
 import zipfile
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from echosign import __version__
 from echosign.processes import hidden_subprocess_options
-from echosign.runtime import (ASR_FILES, ASR_FOLDER, SEMANTIC_FILES,
-                              SEMANTIC_FOLDER, SEMANTIC_MODEL)
+from echosign.runtime import (ASR_FILES, ASR_FOLDER, FFMPEG_FILES, SEMANTIC_FILES,
+                              SEMANTIC_FOLDER, SEMANTIC_MODEL, check_ffmpeg_runtime)
 
 BUILD = ROOT / "build"
 RUNTIME = BUILD / "portable-runtime"
@@ -63,6 +65,72 @@ def copy_files(source: Path, destination: Path, names) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     for name in names:
         shutil.copy2(source / name, destination / name)
+
+
+def prepare_ffmpeg(bundle: Path) -> dict:
+    """Bundle our minimal decoder only with its matching complete source archive."""
+    bundle = bundle.resolve()
+    if not bundle.is_file():
+        raise RuntimeError("The verified FFmpeg bundle is missing; build the audio component first.")
+    with zipfile.ZipFile(bundle) as package:
+        metadata = json.loads(package.read("ffmpeg/SOURCE.json"))
+        if (metadata.get("component") != "FFmpeg"
+                or metadata.get("license") != "LGPL-2.1-or-later"
+                or metadata.get("tls_backend") != "schannel"
+                or metadata.get("corresponding_source_included") is not True):
+            raise RuntimeError("Use the EchoSign FFmpeg audio build with its complete matching source.")
+        source = metadata.get("source_archive") or {}
+        name = source.get("name", "")
+        if not name or Path(name).name != name or not name.endswith("-source.tar.xz"):
+            raise RuntimeError("The FFmpeg source archive name is invalid.")
+        source_archive = bundle.parent / name
+        if not source_archive.is_file() or sha256(source_archive) != source.get("sha256"):
+            raise RuntimeError("The complete matching FFmpeg source archive is missing or changed.")
+        destination = RUNTIME / "ffmpeg"
+        clear_generated(destination)
+        destination.mkdir(parents=True)
+        for filename in FFMPEG_FILES:
+            (destination / filename).write_bytes(package.read("ffmpeg/" + filename))
+        # Keep the MinGW/GCC runtime notices shipped by the verified build.
+        notices = [entry for entry in package.infolist()
+                   if entry.filename.startswith("ffmpeg/licenses/") and not entry.is_dir()]
+        if not notices:
+            raise RuntimeError("The audio build's toolchain license notices are missing.")
+        for entry in notices:
+            target = (destination / entry.filename.removeprefix("ffmpeg/")).resolve()
+            if not target.is_relative_to((destination / "licenses").resolve()):
+                raise RuntimeError("The audio build contains an invalid license path.")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(package.read(entry))
+    executable = destination / "ffmpeg.exe"
+    if sha256(executable) != metadata.get("binary_sha256"):
+        raise RuntimeError("The FFmpeg binary does not match its build provenance.")
+
+    def inspect(option: str) -> str:
+        result = subprocess.run(
+            [str(executable), "-hide_banner", option], stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            check=True, timeout=20, **hidden_subprocess_options())
+        return result.stdout + result.stderr
+
+    version_text = inspect("-version")
+    buildconf = inspect("-buildconf")
+    license_notice = inspect("-L")
+    if (not version_text.startswith(f"ffmpeg version {metadata['version']} ")
+            or "--enable-schannel" not in buildconf or "--disable-autodetect" not in buildconf
+            or "--enable-gpl" in buildconf or "--enable-nonfree" in buildconf
+            or "--enable-version3" in buildconf
+            or "GNU Lesser General Public" not in license_notice):
+        raise RuntimeError("The FFmpeg executable differs from the documented minimal LGPL build.")
+    for filename, actual in (("version.txt", version_text), ("buildconf.txt", buildconf),
+                              ("license-notice.txt", license_notice)):
+        if (destination / filename).read_text(encoding="utf-8").strip() != actual.strip():
+            raise RuntimeError(f"FFmpeg provenance differs from the executable: {filename}")
+    metadata["audio_check"] = check_ffmpeg_runtime(executable)
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_archive, OUTPUT / source_archive.name)
+    print(f"Bundled FFmpeg {metadata['version']}; matching sources and audio decoding verified", flush=True)
+    return metadata
 
 
 def prepare_browsers() -> None:
@@ -117,9 +185,11 @@ def prepare_semantic_model() -> None:
 
 def source_hashes() -> dict[str, str]:
     paths = [ROOT / name for name in ("requirements.txt", "config.example.yaml", "README.md", "LICENSE")]
-    for folder in ("echosign", "assets", "docs", "tools", "tests"):
+    generated = tuple(ROOT / "tools" / "ffmpeg-build" / name for name in ("downloads", "work", "dist"))
+    for folder in ("echosign", "assets", "docs", "tools", "tests", ".github"):
         paths.extend(p for p in (ROOT / folder).rglob("*")
-                     if p.is_file() and "__pycache__" not in p.parts)
+                     if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".jsonl"
+                     and not any(p.is_relative_to(directory) for directory in generated))
     return {p.relative_to(ROOT).as_posix(): sha256(p) for p in sorted(paths)}
 
 
@@ -193,6 +263,8 @@ def verify_archive(archive: Path) -> dict:
             raise RuntimeError(content.get("error", "Runtime check failed"))
         if content["version"] != __version__:
             raise RuntimeError("Packaged version does not match the source")
+        if not content.get("ffmpeg"):
+            raise RuntimeError("Packaged FFmpeg did not pass the offline audio check")
         return content
 
 
@@ -226,13 +298,14 @@ def write_version_resource() -> None:
     (BUILD / "windows-version.txt").write_text(str(resource), encoding="utf-8")
 
 
-def build_release() -> None:
+def build_release(ffmpeg_bundle: Path) -> None:
     if sys.platform != "win32" or struct.calcsize("P") != 8:
         raise SystemExit("Build with 64-bit Python on Windows.")
     BUILD.mkdir(exist_ok=True)
     require_files(ROOT / "models" / ASR_FOLDER, ASR_FILES)
     sources = source_hashes()
     write_version_resource()
+    ffmpeg = prepare_ffmpeg(ffmpeg_bundle)
     prepare_browsers()
     prepare_semantic_model()
     clear_generated(DIST)
@@ -245,6 +318,10 @@ def build_release() -> None:
                        cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream,
                        stderr=subprocess.STDOUT, check=True, **hidden_subprocess_options())
     app = DIST / "EchoSign"
+    packaged_ffmpeg = app / "_internal" / "ffmpeg"
+    require_files(packaged_ffmpeg, FFMPEG_FILES)
+    if sha256(packaged_ffmpeg / "ffmpeg.exe") != ffmpeg["binary_sha256"]:
+        raise RuntimeError("Packaging changed the FFmpeg executable; keep the original static binary.")
     copy_files(ROOT, app, ["README.md", "LICENSE", "config.example.yaml"])
     shutil.copytree(ROOT / "docs", app / "docs")
     shutil.copytree(ROOT / "assets" / "screenshots", app / "assets" / "screenshots")
@@ -258,7 +335,8 @@ def build_release() -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     archive = OUTPUT / f"EchoSign-{VERSION}-win64.zip"
     print(f"Creating {archive.name}", flush=True)
-    forbidden = {"config.yaml", "secrets_local.json", "session_local.json", "browser_profile"}
+    forbidden = {"config.yaml", "secrets_local.json", "session_local.json", "browser_profile",
+                 "live_session.json", "live_profile"}
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as package:
         for path in sorted(app.rglob("*")):
             relative = path.relative_to(DIST)
@@ -269,9 +347,12 @@ def build_release() -> None:
     print("Checking the extracted application with empty user caches", flush=True)
     runtime = verify_archive(archive)
     checksum = sha256(archive)
-    (OUTPUT / "SHA256SUMS.txt").write_text(f"{checksum}  {archive.name}\n", encoding="ascii")
+    source = ffmpeg["source_archive"]
+    (OUTPUT / "SHA256SUMS.txt").write_text(
+        f"{checksum}  {archive.name}\n{source['sha256']}  {source['name']}\n", encoding="ascii")
     manifest = {"version": VERSION, "archive": str(archive.relative_to(ROOT)), "sha256": checksum,
                 "bytes": archive.stat().st_size, "source_hashes": sources, "runtime": runtime,
+                "ffmpeg": ffmpeg,
                 "dependencies": {name: importlib.metadata.version(name)
                                  for name in ("pyinstaller", "playwright", "fastembed", "sherpa-onnx")}}
     (BUILD / f"release-{VERSION}-manifest.json").write_text(
@@ -298,6 +379,11 @@ def github_session() -> requests.Session:
     if not token:
         raise RuntimeError("No GitHub credential is available")
     client = requests.Session()
+    # Only repeat idempotent reads. Uploads are reconciled by asset digest after
+    # a lost response; blindly replaying a POST could create duplicate assets.
+    client.mount("https://", HTTPAdapter(max_retries=Retry(
+        total=3, connect=0, read=3, status=3, other=0, backoff_factor=1,
+        allowed_methods={"GET", "HEAD"}, status_forcelist=(429, 500, 502, 503, 504))))
     client.headers.update({"Authorization": "Bearer " + token,
                            "Accept": "application/vnd.github+json",
                            "X-GitHub-Api-Version": "2022-11-28"})
@@ -342,7 +428,8 @@ def upload_asset(client, api: str, release: dict, path: Path) -> dict:
         with ProgressFile(path) as stream:
             response = client.post(release["upload_url"].split("{", 1)[0],
                 params={"name": path.name}, data=stream, timeout=(30, 600),
-                headers={"Content-Type": "application/zip" if path.suffix == ".zip" else "text/plain"})
+                headers={"Content-Type": "application/zip" if path.suffix == ".zip" else
+                         "application/x-xz" if path.suffix == ".xz" else "text/plain"})
     except requests.RequestException as exc:
         # The server may have accepted every byte even if its response was lost.
         # Confirm the existing asset before doing any further write operation.
@@ -395,11 +482,16 @@ def publish_release(notes_path: Path) -> None:
 
     manifest = json.loads((BUILD / f"release-{VERSION}-manifest.json").read_text(encoding="utf-8"))
     archive = OUTPUT / f"EchoSign-{VERSION}-win64.zip"
-    assets = (archive, OUTPUT / "SHA256SUMS.txt")
+    source = manifest["ffmpeg"]["source_archive"]
+    source_archive = OUTPUT / source["name"]
+    if not source_archive.is_file() or sha256(source_archive) != source["sha256"]:
+        raise RuntimeError("The matching FFmpeg corresponding source must accompany the release")
+    assets = (archive, source_archive, OUTPUT / "SHA256SUMS.txt")
     if (manifest["version"] != VERSION or manifest["source_hashes"] != source_hashes()
             or manifest["sha256"] != sha256(archive) or not manifest["runtime"]["ok"]):
         raise RuntimeError("Rebuild the release: source or archive differs from the verified build")
-    if assets[1].read_text(encoding="ascii") != f"{manifest['sha256']}  {archive.name}\n":
+    if assets[2].read_text(encoding="ascii") != (
+            f"{manifest['sha256']}  {archive.name}\n{source['sha256']}  {source['name']}\n"):
         raise RuntimeError("The checksum file does not match the archive")
 
     with github_session() as client:
@@ -448,12 +540,14 @@ def publish_release(notes_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("build", help="Create and check the portable ZIP")
+    build = commands.add_parser("build", help="Create and check the portable ZIP")
+    build.add_argument("--ffmpeg-bundle", type=Path, required=True,
+                       help="Verified minimal FFmpeg ZIP, with its source archive alongside")
     publish = commands.add_parser("publish", help="Upload the verified build to GitHub")
     publish.add_argument("--notes", type=Path, required=True, help="UTF-8 release notes")
     args = parser.parse_args()
     if args.command == "build":
-        build_release()
+        build_release(args.ffmpeg_bundle)
     else:
         publish_release(args.notes)
 

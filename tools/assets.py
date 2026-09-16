@@ -23,9 +23,10 @@ class DemoApp(ui.App):
         if self._busy() or not self.save_cfg():
             return
         self.stop_event.clear()
+        self._active_audio_source = "live" if self.v_live.get() else "system"
         self._worker(lambda: self.stop_event.wait(), kind="monitor")
         for line in (
-            "[i] ASR 就绪 · 等待课堂声音",
+            "[i] ASR 就绪 · 正在接收直播音频" if self.v_live.get() else "[i] ASR 就绪 · 等待课堂声音",
             "[ASR 10:00:01] 同学们，今天继续学习上一节的内容。",
             "[ASR 10:00:04] 现在开始签到，签到码是二三三零。",
             "[i] 签到提醒：检测到签到码: 2330",
@@ -35,6 +36,9 @@ class DemoApp(ui.App):
 
     def do_login(self):
         self.logline("[i] 演示模式：未连接登录服务。")
+
+    def do_live_login(self, switch_account=False):
+        self.logline("[i] 演示模式：未连接直播登录服务。")
 
     def test_webhook(self):
         self.logline("[i] 演示模式：未发送通知。")

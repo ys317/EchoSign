@@ -1,14 +1,16 @@
 """Release retries must preserve an existing draft and confirmed uploaded bytes."""
 from pathlib import Path
+import json
 import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
+import zipfile
 
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from release import find_release, sha256, upload_asset
+from release import find_release, prepare_ffmpeg, sha256, source_hashes, upload_asset
 
 
 def response(payload):
@@ -16,6 +18,45 @@ def response(payload):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_source_manifest_excludes_runtime_logs_and_includes_build_workflow(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("requirements.txt", "config.example.yaml", "README.md", "LICENSE",
+                         "tests/test_sample.py", "tests/generated.jsonl",
+                         "tools/ffmpeg-build/downloads/source.tar.xz",
+                         ".github/workflows/ffmpeg-audio.yml"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fixture", encoding="utf-8")
+            with patch("release.ROOT", root):
+                sources = source_hashes()
+            self.assertIn("tests/test_sample.py", sources)
+            self.assertIn(".github/workflows/ffmpeg-audio.yml", sources)
+            self.assertNotIn("tests/generated.jsonl", sources)
+            self.assertNotIn("tools/ffmpeg-build/downloads/source.tar.xz", sources)
+
+    def test_audio_bundle_requires_the_matching_source_before_running_any_binary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundle = root / "audio.zip"
+            source = root / "ffmpeg-source.tar.xz"
+            source.write_bytes(b"original corresponding source")
+            metadata = {"component": "FFmpeg", "license": "LGPL-2.1-or-later",
+                        "tls_backend": "schannel", "corresponding_source_included": True,
+                        "source_archive": {"name": source.name, "sha256": sha256(source)}}
+            with zipfile.ZipFile(bundle, "w") as package:
+                package.writestr("ffmpeg/SOURCE.json", json.dumps(metadata))
+            source.write_bytes(b"different source")
+            with patch("release.subprocess.run") as run:
+                with self.assertRaisesRegex(RuntimeError, "source archive is missing or changed"):
+                    prepare_ffmpeg(bundle)
+                run.assert_not_called()
+            source.unlink()
+            with patch("release.subprocess.run") as run:
+                with self.assertRaisesRegex(RuntimeError, "source archive is missing or changed"):
+                    prepare_ffmpeg(bundle)
+                run.assert_not_called()
+
     def test_retry_finds_draft_without_a_published_tag_lookup(self):
         draft = {"id": 1, "tag_name": "v1.4", "draft": True}
         client = MagicMock()

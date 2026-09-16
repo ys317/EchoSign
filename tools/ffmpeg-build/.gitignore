@@ -1,0 +1,5 @@
+/downloads/
+/work/
+/dist/
+/.gpg-*/
+__pycache__/

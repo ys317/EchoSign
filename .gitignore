@@ -1,6 +1,8 @@
 # 本机密钥与状态
 secrets_local.json
 session_local.json
+live_session.json
+live_profile/
 config.yaml
 
 # 运行产物
@@ -11,6 +13,7 @@ run_err.txt
 
 # 大文件/环境
 .venv/
+/_internal/
 models/
 browser_profile/
 dist/

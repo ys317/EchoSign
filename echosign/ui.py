@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from tkinter import font as tkfont
+from tkinter import Canvas, font as tkfont
 
 import customtkinter as ctk
 from PIL import Image, ImageDraw
@@ -86,6 +86,37 @@ def ui_icon(name, size=16, color=TXT2):
     colors = color if isinstance(color, (tuple, list)) else (color, color)
     return ctk.CTkImage(light_image=draw_icon(colors[0]),
                         dark_image=draw_icon(colors[1]), size=(size, size))
+
+
+class TabButton(ctk.CTkButton):
+    """Change selection without rebuilding the button's fixed rounded geometry."""
+
+    def __init__(self, master, **kw):
+        super().__init__(
+            master, width=0, height=32, corner_radius=8, font=(F, 12),
+            fg_color="transparent", hover_color=GHOST_HOVER, text_color=TXT2,
+            **kw)
+        self._selected = False
+
+    def set_selected(self, selected: bool) -> None:
+        if self._selected == selected:
+            return
+        self._selected = selected
+        self._fg_color = TAB_SELECTED if selected else "transparent"
+        self._hover_color = TAB_SELECTED if selected else GHOST_HOVER
+        self._text_color = TXT if selected else TXT2
+        self._font = (F, 12, "bold") if selected else (F, 12)
+        # CTkButton.configure redraws every corner and remaps its canvas when
+        # changing a font. Selection only needs the existing shapes recolored.
+        background = self._apply_appearance_mode(
+            self._bg_color if self._fg_color == "transparent" else self._fg_color)
+        # All inner shapes share a fill; one native tag update also covers CTk's
+        # text-based corners without its per-item outline compatibility loop.
+        Canvas.itemconfigure(self._canvas, "inner_parts", fill=background)
+        if self._text_label is not None:
+            self._text_label.configure(
+                bg=background, fg=self._apply_appearance_mode(self._text_color),
+                font=self._apply_font_scaling(self._font))
 
 
 class Switch(ctk.CTkFrame):

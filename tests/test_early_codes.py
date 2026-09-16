@@ -71,6 +71,19 @@ class EarlyCodeTests(unittest.TestCase):
         self.assertEqual(self.partial("七五三八七五", 1.5, 2), [])
         self.assertEqual(self.partial("七五三八七五三八", 2, 3), [("7538", "七五三八七五三八")])
 
+    def test_audio_gap_discards_candidate_stability_and_keeps_confirmed_dedup(self):
+        self.assertEqual(self.watcher.feed("七五三八"), [("7538", "七五三八")])
+        text = "签到码一二三四大家输入"
+        self.assertEqual(self.partial(text, 1, 1, True), [])
+        self.watcher.discard_partial()
+        # A new connection can produce the same revision number. Evidence from
+        # before the gap cannot count toward the confirmation window.
+        self.assertEqual(self.partial(text, 3, 1, True), [])
+        self.assertEqual(self.partial(text, 3.25, 2, True), [])
+        self.assertEqual(self.partial(text, 3.5, 3, True), [("1234", text)])
+        self.assertEqual(self.watcher.feed("七五三八"), [])
+        self.assertEqual([code for code, _ in self.watcher.codes_found], ["7538", "1234"])
+
     def test_final_of_very_long_utterance_does_not_resubmit_early_code(self):
         self.partial("签到码一二三四大家", 1, 1, True)
         self.partial("签到码一二三四大家", 2, 2, True)

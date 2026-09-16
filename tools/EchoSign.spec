@@ -4,12 +4,19 @@ from pathlib import Path
 
 ROOT = Path(SPECPATH).resolve().parent
 BROWSERS = ROOT / 'build' / 'portable-runtime' / 'browsers'
+FFMPEG = ROOT / 'build' / 'portable-runtime' / 'ffmpeg'
 if not BROWSERS.is_dir():
-    raise RuntimeError('Use python tools/release.py build to prepare the portable runtime.')
+    raise RuntimeError('Use tools/release.py build --ffmpeg-bundle <audio ZIP> to prepare the portable runtime.')
+if not all((FFMPEG / name).is_file() for name in (
+        'ffmpeg.exe', 'LICENSE', 'README.txt', 'SOURCE.json', 'version.txt',
+        'buildconf.txt', 'license-notice.txt')):
+    raise RuntimeError('The complete FFmpeg runtime and notices are missing. '
+                       'Use tools/release.py build --ffmpeg-bundle <audio ZIP> to prepare them.')
 
 datas = [(str(ROOT / 'config.example.yaml'), '.'),
          (str(ROOT / 'assets' / 'echosign.ico'), 'assets'),
-         (str(BROWSERS), 'browsers')]
+         (str(BROWSERS), 'browsers'),
+         (str(FFMPEG), 'ffmpeg')]
 binaries = []
 hiddenimports = ['soundcard.mediafoundation']
 for package in ('sherpa_onnx', 'soundcard', 'fastembed', 'onnxruntime',
@@ -60,6 +67,6 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=['ffmpeg.exe'],
     name='EchoSign',
 )

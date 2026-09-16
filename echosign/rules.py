@@ -169,6 +169,12 @@ class SignInWatcher:
     def active(self) -> bool:
         return self.clock() < self.watch_until
 
+    def discard_partial(self) -> None:
+        """Discard unfinished recognition after an audio gap; keep confirmed codes."""
+        self._partial_revision = -1
+        self._candidates.clear()
+        self._early_sent.clear()
+
     def trigger(self, text: str, reason: str) -> None:
         now = self.clock()
         self.watch_until = now + self.window_seconds

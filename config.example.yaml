@@ -3,7 +3,9 @@ device: null # 输出设备(扬声器)名称关键词, null=系统默认; 用 `p
 chunk_seconds: 0.25 # 每次送给 ASR 的音频块长度
 
 # ====== 课堂 ======
-live_url: "" # 选填，仅用于快捷打开课程；也可以直接在浏览器播放
+live_url: "" # 电脑声音模式下选填；后台音频模式须填写杭电直播页面网址
+live_audio:
+  enabled: false # 开启后须填写杭电直播页面并登录直播，只在后台读取音轨
 location: # 「课堂」页可获取 Windows 当前位置或手动填写，请核对后保存
   lat: 30.314732
   lng: 120.343727
@@ -11,7 +13,7 @@ location: # 「课堂」页可获取 Windows 当前位置或手动填写，请�
 # ====== ASR 引擎 ======
 asr:
   model_dir: models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30
-  num_threads: 4
+  num_threads: 1 # 实时识别默认单线程，降低持续 CPU 占用
   provider: cpu # 迁到 N 卡机器后改 cuda, 并配合 provider=cuda 的 sherpa-onnx 版本
   hotwords: []  # 可选实验项；热词也可能改错数字或把讲课内容识别成签到提示
   # 可试用 [签到, 签到码, 签个到, 点名, 点个名, 点个到, 打卡]，先用本人课堂录音核对错码和误报

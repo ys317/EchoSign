@@ -17,7 +17,7 @@ SAMPLE_RATE = 16000
 
 
 class StreamingASR:
-    def __init__(self, model_dir: str, num_threads: int = 4, provider: str = "cpu",
+    def __init__(self, model_dir: str, num_threads: int = 1, provider: str = "cpu",
                  hotwords: Optional[List[str]] = None, hotwords_score: float = 1.5,
                  decoding_method: Optional[str] = None):
         import sherpa_onnx
