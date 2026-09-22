@@ -25,6 +25,7 @@ import yaml
 
 from echosign import __version__, ui as design
 from echosign.location import DEFAULT_LAT, DEFAULT_LNG, Location, LocationError, get_current_location
+from echosign.live import LiveCourse
 from echosign.ui import Entry, Switch, TabButton
 from echosign.runtime import application_root, resource_root
 
@@ -36,6 +37,7 @@ RESOURCE_ROOT = resource_root()
 
 APP_VERSION = f"v{__version__}"
 MAX_LOG_LINES = 1500
+SCHEDULE_START_DELAY = 2.0
 
 
 def load_cfg() -> dict:
@@ -113,6 +115,7 @@ class App(ctk.CTk):
         self._monitor_ready = False
         self._live_courses = []
         self._live_course_lookup = {}
+        self._scheduled_course: LiveCourse | None = None
         self.v_url = ctk.StringVar()
         self.v_user = ctk.StringVar()
         self.v_pwd = ctk.StringVar()
@@ -511,6 +514,7 @@ class App(ctk.CTk):
         self.v_sem.set(bool((rules.get("semantic") or {}).get("enabled", False)))
         self.txt_rules.insert("1.0", "\n".join(str(r) for r in rules.get("strong", [])))
         self._update_audio_mode()
+        self._restore_scheduled_course()
 
     def _field_values(self):
         return (
@@ -522,14 +526,85 @@ class App(ctk.CTk):
         )
 
     @staticmethod
-    def _course_label(course):
+    def _course_label(course, *, now=None):
         title = course.title
         title = title if len(title) <= 12 else title[:11] + "…"
-        when = dt.datetime.fromtimestamp(course.start, dt.timezone(dt.timedelta(hours=8))).strftime("%H:%M")
+        zone = dt.timezone(dt.timedelta(hours=8))
+        course_when = dt.datetime.fromtimestamp(course.start, zone)
+        current = (dt.datetime.fromtimestamp(now, zone) if now is not None
+                   else dt.datetime.now(zone))
+        tomorrow = current.date() + dt.timedelta(days=1)
+        if course_when.date() == tomorrow:
+            when = "明日 " + course_when.strftime("%H:%M")
+        elif course_when.date() > tomorrow:
+            when = course_when.strftime("%m-%d %H:%M")
+        else:
+            when = course_when.strftime("%H:%M")
         detail = course.teacher or course.classroom
         detail = detail if len(detail) <= 8 else detail[:7] + "…"
+        if course_when.date() > current.date():
+            return " · ".join(part for part in (when, title, detail) if part)
         suffix = " · ".join(part for part in (when, detail) if part)
         return f"{title} · {suffix}" if suffix else title
+
+    @staticmethod
+    def _scheduled_course_data(course: LiveCourse) -> dict:
+        return {
+            "course_id": course.course_id,
+            "title": course.title,
+            "start": course.start,
+            "end": course.end,
+            "teacher": course.teacher,
+            "classroom": course.classroom,
+            "section": course.section,
+            "tecl_id": course.tecl_id,
+            "origin": course.origin,
+        }
+
+    @staticmethod
+    def _scheduled_course_from_data(value: object) -> LiveCourse | None:
+        if not isinstance(value, dict):
+            return None
+        try:
+            course = LiveCourse(
+                str(value["course_id"]), str(value["title"]),
+                float(value["start"]), float(value["end"]),
+                str(value.get("teacher", "")), str(value.get("classroom", "")),
+                str(value.get("section", "")), str(value.get("tecl_id", "")),
+                str(value.get("origin", "https://course.hdu.edu.cn")),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not (math.isfinite(course.start) and math.isfinite(course.end)
+                and course.end > course.start):
+            return None
+        return course
+
+    def _restore_scheduled_course(self):
+        stored = self.cfg.get("scheduled_course")
+        course = self._scheduled_course_from_data(stored)
+        now = time.time()
+        if course is None or course.end <= now:
+            if stored is not None:
+                self.cfg.pop("scheduled_course", None)
+                self._write_scheduled_course(None)
+            if stored is not None:
+                self._live_course_hint.configure(
+                    text="已忽略无效或已结束的预约。", text_color=design.AMBER)
+            return
+        self._scheduled_course = course
+        from echosign.live import live_course_url
+
+        try:
+            self.v_url.set(live_course_url(course))
+            self.v_live.set(True)
+            self._update_audio_mode()
+        except Exception:
+            self._scheduled_course = None
+            self.cfg.pop("scheduled_course", None)
+            self._write_scheduled_course(None)
+            return
+        self._show_scheduled_state(restored=True)
 
     def _set_live_course_choices(self, courses):
         self._live_courses = list(courses or [])
@@ -554,15 +629,19 @@ class App(ctk.CTk):
                     continue
             self.v_live_course.set(current)
             self._live_course_hint.configure(
-                text=f"找到 {len(labels)} 节直播课，选择后启用后台音频。",
+                text=f"找到 {len(labels)} 节今明直播课，选择后启用后台音频。",
                 text_color=design.TXT3)
+            if self._scheduled_course is not None:
+                self._show_scheduled_state(restored=True)
         else:
             text = "当前没有可选择的直播课"
             self.live_course_picker.configure(values=[text], state="disabled")
             self.v_live_course.set(text)
             self._live_course_hint.configure(
-                text="未找到正在直播的课程，仍可手动粘贴链接。",
+                text="今明两天没有可选择的直播课，仍可手动粘贴链接。",
                 text_color=design.AMBER)
+            if self._scheduled_course is not None:
+                self._show_scheduled_state(restored=True)
 
     def _select_live_course(self, label):
         if self._task_kind or self._closing:
@@ -572,18 +651,23 @@ class App(ctk.CTk):
             return
         from echosign.live import live_course_url
 
+        if self._scheduled_course is not None:
+            self._cancel_scheduled_course(notify=False)
+
         self.v_live_course.set(label)
         self.v_url.set(live_course_url(course))
         self.v_live.set(True)
         self._entries["url"].invalid = False
         self._entries["url"].configure(border_color=design.INPUT_BORDER)
         zone = dt.timezone(dt.timedelta(hours=8))
-        when = dt.datetime.fromtimestamp(course.start, zone).strftime("%H:%M")
+        when = dt.datetime.fromtimestamp(course.start, zone).strftime("%m-%d %H:%M")
         end = dt.datetime.fromtimestamp(course.end, zone).strftime("%H:%M")
         details = " · ".join(part for part in (course.teacher, course.classroom, course.section) if part)
+        action = "点击「预约监控」。" if course.start > time.time() else "点击启动监控。"
         self._live_course_hint.configure(
-            text=f"{course.title}\n{when}–{end}  {details}\n已选好，点击启动监控。",
+            text=f"{course.title}\n{when}–{end}  {details}\n已选好，{action}",
             text_color=design.GREEN)
+        self._update_monitor_button()
 
     def _load_saved_live_courses(self):
         self._courses_job = None
@@ -592,6 +676,13 @@ class App(ctk.CTk):
 
     def _url_edited(self, *_):
         from echosign.live import live_course_url
+        if self._scheduled_course is not None:
+            try:
+                scheduled_url = live_course_url(self._scheduled_course)
+            except Exception:
+                scheduled_url = ""
+            if self.v_url.get().strip() != scheduled_url:
+                self._cancel_scheduled_course(notify=True)
         selected = self._live_course_lookup.get(self.v_live_course.get())
         if selected is not None and live_course_url(selected) != self.v_url.get().strip():
             self.v_live_course.set("请选择直播课程")
@@ -616,8 +707,176 @@ class App(ctk.CTk):
         cfg["live_url"] = self.v_url.get().strip()
         self._worker(run, cfg, kind="live_courses")
 
+    @staticmethod
+    def _course_time_text(course: LiveCourse, *, now=None) -> str:
+        zone = dt.timezone(dt.timedelta(hours=8))
+        course_when = dt.datetime.fromtimestamp(course.start, zone)
+        current = (dt.datetime.fromtimestamp(now, zone) if now is not None
+                   else dt.datetime.now(zone))
+        if course_when.date() == current.date():
+            prefix = "今天"
+        elif course_when.date() == current.date() + dt.timedelta(days=1):
+            prefix = "明日"
+        else:
+            prefix = course_when.strftime("%m-%d")
+        return f"{prefix} {course_when.strftime('%H:%M')}"
+
+    def _update_monitor_button(self):
+        if not self._closing:
+            self.b_monitor.configure(state="normal")
+        if self._task_kind == "monitor":
+            self.b_monitor.configure(
+                text="停止监控", image=design.ui_icon("stop", 15, design.BUTTON_TEXT))
+            return
+        if self._scheduled_course is not None:
+            self.b_monitor.configure(
+                text="取消预约", image=design.ui_icon("clock", 15, design.BUTTON_TEXT))
+            return
+        selected = self._live_course_lookup.get(self.v_live_course.get())
+        if selected is not None and selected.start > time.time():
+            self.b_monitor.configure(
+                text="预约监控", image=design.ui_icon("clock", 15, design.BUTTON_TEXT))
+        else:
+            self.b_monitor.configure(
+                text="启动监控", image=design.ui_icon("play", 15, design.BUTTON_TEXT))
+
+    def _write_scheduled_course(self, course: LiveCourse | None) -> bool:
+        cfg = load_cfg()
+        if course is None:
+            cfg.pop("scheduled_course", None)
+        else:
+            cfg["scheduled_course"] = self._scheduled_course_data(course)
+        try:
+            CONFIG.write_text(
+                yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        except OSError as exc:
+            self._feedback(f"预约保存失败：{exc.strerror or '无法写入配置文件'}", error=True)
+            return False
+        self.cfg = cfg
+        return True
+
+    def _show_scheduled_state(self, restored=False):
+        course = self._scheduled_course
+        if course is None:
+            return
+
+        when = self._course_time_text(course)
+        zone = dt.timezone(dt.timedelta(hours=8))
+        end = dt.datetime.fromtimestamp(course.end, zone).strftime("%H:%M")
+        details = " · ".join(part for part in (course.teacher, course.classroom, course.section) if part)
+        self._update_monitor_button()
+        self._set_status(design.AMBER, "已预约")
+        self._live_course_hint.configure(
+            text=(f"{course.title}\n{when}–{end}  {details}\n"
+                  "到点会自动启动监控。"),
+            text_color=design.GREEN)
+        self._transcript.configure(text=f"等待{when}的课程开始", text_color=design.TXT2)
+        self._transcript_hint.configure(
+            text=("已恢复预约，到点自动启动监控。" if restored else
+                  "预约已保存；到点自动启动，点击主按钮可取消。"))
+        label = next((label for label, candidate in self._live_course_lookup.items()
+                      if self._urls_equal(candidate, course)), None)
+        self.v_live_course.set(label or f"已预约 · {when}")
+        self._update_scheduled_countdown()
+
+    @staticmethod
+    def _urls_equal(left: LiveCourse, right: LiveCourse) -> bool:
+        from echosign.live import live_course_url
+
+        try:
+            return live_course_url(left) == live_course_url(right)
+        except Exception:
+            return False
+
+    def _update_scheduled_countdown(self):
+        if self._scheduled_course is None:
+            return
+        remaining = max(0, int(self._scheduled_course.start + SCHEDULE_START_DELAY - time.time()))
+        days, seconds = divmod(remaining, 86400)
+        clock = f"{seconds // 3600:02}:{seconds // 60 % 60:02}:{seconds % 60:02}"
+        text = f"{days}天 {clock}" if days else clock
+        self._metrics["time"].configure(text=text)
+
+    def _schedule_monitor(self, course: LiveCourse) -> bool:
+        if self._busy() or self._closing:
+            return False
+        now = time.time()
+        if course.end <= now:
+            self._live_course_hint.configure(
+                text="这节课已经结束，无法预约。", text_color=design.AMBER)
+            return False
+        if course.start <= now:
+            return self.start_monitor()
+        self._scheduled_course = course
+        if not self.save_cfg():
+            self._scheduled_course = None
+            self._update_monitor_button()
+            return False
+        self._show_scheduled_state()
+        self.logline(f"[i] 已预约监控：{course.title} · {self._course_time_text(course)}")
+        return True
+
+    def _cancel_scheduled_course(self, notify=True) -> bool:
+        course = self._scheduled_course
+        if course is None:
+            return False
+        self._scheduled_course = None
+        persisted = self._write_scheduled_course(None)
+        self._update_monitor_button()
+        if self._task_kind is None:
+            self._set_status(design.TXT3, "就绪")
+        if notify:
+            when = self._course_time_text(course)
+            self._live_course_hint.configure(
+                text=f"已取消 {when} 的课程预约。", text_color=design.TXT3)
+            self.logline(f"[i] 已取消监控预约：{course.title} · {when}")
+        return persisted
+
+    def _discard_scheduled_course(self, reason: str):
+        course = self._scheduled_course
+        if course is None:
+            return
+        self._scheduled_course = None
+        self._write_scheduled_course(None)
+        self._update_monitor_button()
+        if self._task_kind is None:
+            self._set_status(design.TXT3, "就绪")
+        self._live_course_hint.configure(text=reason, text_color=design.AMBER)
+        self.logline(f"[!] {reason}")
+
+    def _check_scheduled_monitor(self):
+        course = self._scheduled_course
+        if course is None or self._closing:
+            return
+        now = time.time()
+        if now < course.start + SCHEDULE_START_DELAY:
+            self._update_scheduled_countdown()
+            return
+        if now >= course.end:
+            self._discard_scheduled_course("预约课程已结束，未启动监控。")
+            return
+        if self._task_kind is not None:
+            return
+        self._start_scheduled_monitor()
+
+    def _start_scheduled_monitor(self):
+        course = self._scheduled_course
+        if course is None:
+            return False
+        self._scheduled_course = None
+        self._update_monitor_button()
+        self.logline(
+            f"[i] 预约课程到点，正在启动监控：{course.title} · {self._course_time_text(course)}")
+        started = self.start_monitor()
+        if not started:
+            self._scheduled_course = course
+            self._show_scheduled_state()
+        return started
+
     def _update_audio_mode(self, *_):
         direct = self.v_live.get()
+        if (self._scheduled_course is not None and not direct and not self._loading):
+            self._cancel_scheduled_course(notify=True)
         self._field_labels["url"].configure(
             text="手动直播网址" if direct else "课程网址（选填）")
         self.b_live_login.configure(
@@ -676,6 +935,10 @@ class App(ctk.CTk):
         cfg["ui"] = {**(cfg.get("ui") or {}), "appearance": self._appearance}
         cfg["live_url"] = self.v_url.get().strip()
         cfg.setdefault("live_audio", {})["enabled"] = bool(self.v_live.get())
+        if self._scheduled_course is None:
+            cfg.pop("scheduled_course", None)
+        else:
+            cfg["scheduled_course"] = self._scheduled_course_data(self._scheduled_course)
         cfg.setdefault("alert", {}).setdefault("webhook", {})["url"] = self.v_hook.get().strip()
         cfg["location"] = {**(cfg.get("location") or {}), **coords}
         cfg.setdefault("auto_sign", {})["enabled"] = bool(self.v_auto.get())
@@ -856,9 +1119,7 @@ class App(ctk.CTk):
         self._task_kind = None
         self._t0 = None
         self.worker = None
-        self.b_monitor.configure(
-            state="normal", text="启动监控",
-            image=design.ui_icon("play", 15, design.BUTTON_TEXT))
+        self._update_monitor_button()
         self.b_login.configure(state="normal", text="登录 / 刷新")
         self.b_test.configure(state="normal", text="测试推送")
         self.b_locate.configure(state="normal", text="获取当前位置")
@@ -872,30 +1133,41 @@ class App(ctk.CTk):
             self.logline("[i] 监控已停止。")
         else:
             self._set_status(design.TXT3, "就绪")
+        if self._scheduled_course is not None:
+            self._set_status(design.AMBER, "已预约")
         if kind == "live_login" and not failed and result == 0:
             self.refresh_live_courses()
 
     def toggle_monitor(self):
         if self._task_kind == "monitor":
             self.stop_monitor()
+            return
+        if self._scheduled_course is not None:
+            self._cancel_scheduled_course(notify=True)
+            return
+        selected = self._live_course_lookup.get(self.v_live_course.get())
+        if selected is not None and selected.start > time.time():
+            self._schedule_monitor(selected)
         else:
             self.start_monitor()
 
     def start_monitor(self):
         if self._busy():
-            return
+            return False
         if self.v_live.get() and not self._valid_url(self.v_url.get().strip()):
             self._field_error("url", "请选择直播课程，或手动填写直播网址")
-            return
+            return False
         if self.v_live.get():
             from echosign.live import LiveError, parse_live_page
             try:
                 parse_live_page(self.v_url.get().strip())
             except LiveError as exc:
                 self._field_error("url", str(exc))
-                return
+                return False
+        if self._scheduled_course is not None:
+            self._cancel_scheduled_course(notify=False)
         if not self.save_cfg():
-            return
+            return False
         self.stop_event.clear()
         self._active_audio_source = "live" if self.v_live.get() else "system"
 
@@ -905,7 +1177,7 @@ class App(ctk.CTk):
             if not self.stop_event.is_set():
                 monitor.cmd_run(cfg, self.stop_event)
 
-        self._worker(run, copy.deepcopy(self.cfg), kind="monitor")
+        return self._worker(run, copy.deepcopy(self.cfg), kind="monitor")
 
     def stop_monitor(self):
         if self._task_kind != "monitor" or self.stop_event.is_set():
@@ -991,6 +1263,7 @@ class App(ctk.CTk):
 
     def _tick(self):
         self._update_timer()
+        self._check_scheduled_monitor()
         self._tick_job = self.after(1000, self._tick)
 
     # ---------- 日志和实时转写 ----------

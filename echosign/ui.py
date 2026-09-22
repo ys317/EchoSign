@@ -75,6 +75,10 @@ def ui_icon(name, size=16, color=TXT2):
             draw.polygon(((32, 22), (74, 48), (32, 74)), fill=ink)
         elif name == "stop":
             draw.rounded_rectangle((27, 27, 69, 69), radius=8, fill=ink)
+        elif name == "clock":
+            draw.ellipse((18, 18, 78, 78), outline=ink, width=7)
+            draw.line(((48, 29), (48, 52)), fill=ink, width=7)
+            draw.line(((48, 52), (67, 63)), fill=ink, width=7)
         elif name == "copy":
             draw.rounded_rectangle((34, 33, 77, 80), radius=8, outline=ink, width=6)
             draw.line(((22, 61), (18, 61), (18, 17), (60, 17), (60, 22)),

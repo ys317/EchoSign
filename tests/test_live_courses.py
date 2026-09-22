@@ -17,6 +17,8 @@ from echosign import live
 
 ORIGIN = "https://course.hdu.edu.cn"
 VPN = "https://https-course-hdu-edu-cn-443.webvpn.hdu.edu.cn"
+NOW = dt.datetime(
+    2026, 9, 22, 12, 0, tzinfo=dt.timezone(dt.timedelta(hours=8))).timestamp()
 
 
 def cookie(domain="course.hdu.edu.cn"):
@@ -85,6 +87,9 @@ class LiveCourseListTests(unittest.TestCase):
         self.root_patch = patch.object(live, "application_root", return_value=self.root)
         self.root_patch.start()
         self.addCleanup(self.root_patch.stop)
+        self.now_patch = patch.object(live, "_now", return_value=NOW)
+        self.now_patch.start()
+        self.addCleanup(self.now_patch.stop)
         self.request_patch = patch.object(
             requests.Session, "request",
             side_effect=AssertionError("Network is forbidden in this test"))
@@ -284,6 +289,57 @@ class LiveCourseListTests(unittest.TestCase):
         self.assertEqual([course.course_id for course in self.list()], ["1", "2"])
         self.assertEqual([call.kwargs["params"]["page.pageIndex"] for call in self.get.call_args_list], [1, 2])
         self.assertEqual(self.response.close.call_count, 2)
+
+    def test_one_home_query_is_filtered_to_today_and_tomorrow_locally(self):
+        body = payload([
+            record(1, courBeginTime="2026-09-20 08:00:00",
+                   courEndTime="2026-09-20 08:45:00"),
+            record(2),
+            record(3, courBeginTime="2026-09-23 10:00:00",
+                   courEndTime="2026-09-23 11:35:00"),
+            record(4, courBeginTime="2026-09-24 10:00:00",
+                   courEndTime="2026-09-24 11:35:00"),
+        ])
+        self.response.json.return_value = body
+
+        courses = self.list()
+
+        self.assertEqual([course.course_id for course in courses], ["2", "3"])
+        self.assertEqual([call.kwargs["params"]["liveDay"] for call in self.get.call_args_list], [0])
+        self.assertEqual([call.kwargs["params"]["page.pageIndex"] for call in self.get.call_args_list], [1])
+
+    def test_date_filter_uses_beijing_time_at_the_start_of_the_request(self):
+        with patch.object(live, "_now", return_value=NOW + 12 * 60 * 60):
+            self.response.json.return_value = payload([
+                record(1, courBeginTime="2026-09-23 00:30:00",
+                       courEndTime="2026-09-23 01:15:00"),
+                record(2, courBeginTime="2026-09-24 08:00:00",
+                       courEndTime="2026-09-24 08:45:00"),
+            ])
+            courses = self.list()
+        self.assertEqual([course.course_id for course in courses], ["1", "2"])
+
+    def test_pagination_is_deduplicated_and_filtered_after_all_pages(self):
+        first = payload([
+            record(2, courBeginTime="2026-09-23 10:00:00",
+                   courEndTime="2026-09-23 11:35:00"),
+            record(5, courBeginTime="2026-09-25 10:00:00",
+                   courEndTime="2026-09-25 11:35:00"),
+        ])
+        first["data"]["total"] = 3
+        second = payload([
+            record(1, courBeginTime="2026-09-22 07:10:00",
+                   courEndTime="2026-09-22 07:55:00"),
+            record(2, courBeginTime="2026-09-23 10:00:00",
+                   courEndTime="2026-09-23 11:35:00"),
+        ])
+        second["data"]["total"] = 3
+        self.response.json.side_effect = [first, second]
+
+        courses = self.list()
+
+        self.assertEqual([course.course_id for course in courses], ["1", "2"])
+        self.assertEqual([call.kwargs["params"]["page.pageIndex"] for call in self.get.call_args_list], [1, 2])
 
     def test_repeated_page_fails_instead_of_returning_an_incomplete_list(self):
         body = payload()

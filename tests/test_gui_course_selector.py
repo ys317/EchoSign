@@ -35,10 +35,12 @@ class LiveCourseSelectorTests(unittest.TestCase):
         self.app = object.__new__(gui.App)
         self.app._live_courses = []
         self.app._live_course_lookup = {}
+        self.app._scheduled_course = None
         self.app._task_kind = None
         self.app._closing = False
         self.app.live_course_picker = _Widget()
         self.app._live_course_hint = _Widget()
+        self.app.b_monitor = _Widget()
         self.app.v_live_course = _Var()
         self.app.v_url = _Var()
 

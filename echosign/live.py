@@ -329,13 +329,13 @@ def _normalise_course(record: object, origin: str) -> LiveCourse | None:
                       _text(record.get("clroName")), section, tecl_id, origin)
 
 
-def _course_list_page(session, origin: str, page: int) -> dict:
+def _course_list_page(session, origin: str, page: int, live_day: int = 0) -> dict:
     try:
         response = session.get(
             origin + _API + "/v1/vod_live/t-1",
             params={"page.pageIndex": page, "page.pageSize": 1000,
                     "page.orders[0].asc": "true",
-                    "page.orders[0].field": "courBeginTime", "liveDay": 0},
+                    "page.orders[0].field": "courBeginTime", "liveDay": live_day},
             timeout=(10, 15), allow_redirects=False)
     except requests.exceptions.SSLError:
         raise LiveError("课堂直播平台的安全连接验证失败，请检查系统时间或联系平台。") from None
@@ -357,10 +357,15 @@ def _course_list_page(session, origin: str, page: int) -> dict:
     return data
 
 
+def _now() -> float:
+    return time.time()
+
+
 def list_live_courses(config: dict | None = None, *, stop=None) -> list[LiveCourse]:
     """Return the current account's live lessons without opening a playback page."""
     origin = _list_origin(config)
     session, cookies = _authenticated_session(origin, config)
+    requested_at = _now()
     try:
         unique = {}
         received = 0
@@ -383,8 +388,15 @@ def list_live_courses(config: dict | None = None, *, stop=None) -> list[LiveCour
             total = data.get("total")
             if (not records or (type(total) is int and 0 <= total <= received)
                     or (type(total) is not int and len(records) < 1000)):
-                return sorted(unique.values(), key=lambda course: (course.start, course.end, course.course_id))
-        raise LiveError("直播课程过多，暂时无法完整读取，请稍后刷新或手动填写网址。")
+                break
+        else:
+            raise LiveError("直播课程过多，暂时无法完整读取，请稍后刷新或手动填写网址。")
+
+        current = dt.datetime.fromtimestamp(requested_at, _BEIJING).date()
+        visible_dates = {current, current + dt.timedelta(days=1)}
+        courses = [course for course in unique.values()
+                   if dt.datetime.fromtimestamp(course.start, _BEIJING).date() in visible_dates]
+        return sorted(courses, key=lambda course: (course.start, course.end, course.course_id))
     finally:
         session.headers.pop("jwt-token", None)
         session.cookies.clear()
