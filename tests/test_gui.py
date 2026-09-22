@@ -100,7 +100,7 @@ class GuiTests(unittest.TestCase):
                 self.app.v_lat.set(value)
                 self.assertFalse(self.app.save_cfg())
                 self.assertEqual(original, (ui.CONFIG.read_bytes(), ui.SECRETS.read_bytes()))
-                self.assertEqual(self.app._active_tab, "basic")
+                self.assertEqual(self.app._active_tab, "signin")
                 self.assertTrue(self.app._entries["lat"].invalid)
         self.app.v_lat.set("30")
         self.app.v_lng.set("181")
@@ -136,7 +136,7 @@ class GuiTests(unittest.TestCase):
             self.app.start_monitor()
             worker.assert_not_called()
         self.assertEqual(self.app._active_tab, "basic")
-        self.assertIn("需要填写", self.app._save_state.cget("text"))
+        self.assertIn("请选择直播课程", self.app._save_state.cget("text"))
         self.app.v_url.set("https://course.hdu.edu.cn/#/play-center?courseId=123&target=live")
         with patch.object(self.app, "_worker", return_value=True) as worker:
             self.app.start_monitor()
@@ -144,16 +144,14 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.app._active_audio_source, "live")
         self.assertTrue(yaml.safe_load(ui.CONFIG.read_text(encoding="utf-8"))["live_audio"]["enabled"])
 
-    def test_url_action_matches_the_selected_audio_mode(self):
-        with patch.object(self.app, "do_live_login") as login, patch.object(self.app, "open_url") as open_url:
-            self.app.v_live.set(True)
-            self.app._url_action()
-            login.assert_called_once()
-            open_url.assert_not_called()
-            self.assertEqual(self.app.b_url.cget("text"), "登录直播")
-            self.app.v_live.set(False)
-            self.app._url_action()
-            open_url.assert_called_once()
+    def test_live_login_is_available_without_a_url_in_both_audio_modes(self):
+        for direct in (False, True):
+            self.app.v_live.set(direct)
+            self.app.v_url.set("")
+            with patch.object(self.app, "_worker", return_value=True) as worker:
+                self.app.do_live_login()
+            self.assertEqual(worker.call_args.args[1], "https://course.hdu.edu.cn/#/home")
+            self.assertEqual(self.app.b_live_login.cget("text"), "登录直播")
             self.assertEqual(self.app.b_url.cget("text"), "打开 ↗")
 
     def test_background_audio_login_is_disabled_while_monitoring(self):
@@ -161,24 +159,67 @@ class GuiTests(unittest.TestCase):
         self.addCleanup(release.set)
         self.app.v_live.set(True)
         self.app._worker(lambda: release.wait(2), kind="monitor")
-        self.assertEqual(self.app.b_url.cget("state"), "disabled")
+        self.assertEqual(self.app.b_live_login.cget("state"), "disabled")
         self.assertEqual(self.app.b_live_account.cget("state"), "disabled")
         with patch.object(self.app, "save_cfg") as save:
             self.app.do_live_login()
             save.assert_not_called()
         release.set()
         self.pump_until(lambda: self.app._task_kind is None)
-        self.assertEqual(self.app.b_url.cget("state"), "normal")
+        self.assertEqual(self.app.b_live_login.cget("state"), "normal")
         self.assertEqual(self.app.b_live_account.cget("state"), "normal")
 
     def test_live_account_switch_requests_a_separate_manual_login(self):
         url = "https://course.hdu.edu.cn/#/play-center?courseId=123&target=live"
         self.app.v_live.set(True)
         self.app.v_url.set(url)
-        with patch("echosign.live.login_live", return_value=0) as login:
+        with patch("echosign.live.login_live", return_value=0) as login, \
+                patch.object(self.app, "refresh_live_courses") as refresh:
             self.app.b_live_account.invoke()
             self.pump_until(lambda: self.app._task_kind is None)
         login.assert_called_once_with(url, self.app.stop_event, switch_account=True)
+        refresh.assert_called_once()
+
+    def test_course_refresh_uses_unsaved_url_and_applies_selection_before_monitor(self):
+        from echosign.live import LiveCourse, live_course_url
+        course = LiveCourse("123", "网络安全", 1790038500, 1790041200, tecl_id="456")
+        url = "https://course.hdu.edu.cn/#/home"
+        self.app.v_url.set(url)
+        with patch("echosign.live.list_live_courses", return_value=[course]) as read:
+            self.app.refresh_live_courses()
+            self.pump_until(lambda: self.app._task_kind is None)
+        self.assertEqual(read.call_args.args[0]["live_url"], url)
+        self.assertEqual(self.app.v_url.get(), url)
+        self.app._select_live_course(next(iter(self.app._live_course_lookup)))
+        with patch.object(self.app, "_worker", return_value=True) as worker:
+            self.app.start_monitor()
+        cfg = worker.call_args.args[1]
+        self.assertEqual(cfg["live_url"], live_course_url(course))
+        self.assertTrue(cfg["live_audio"]["enabled"])
+
+    def test_failed_refresh_clears_stale_courses_and_preserves_manual_url(self):
+        from echosign.live import LiveCourse, LiveLoginRequired
+        self.app._set_live_course_choices([LiveCourse("123", "课堂", 1, 2)])
+        before = self.app.v_url.get()
+        with patch("echosign.live.list_live_courses", side_effect=LiveLoginRequired("请登录直播")):
+            self.app.refresh_live_courses()
+            self.pump_until(lambda: self.app._task_kind is None)
+        self.assertFalse(self.app._live_course_lookup)
+        self.assertEqual(self.app.live_course_picker.cget("state"), "disabled")
+        self.assertEqual(self.app.v_url.get(), before)
+        self.assertIn("请登录直播", self.app._live_course_hint.cget("text"))
+
+    def test_saved_login_triggers_auto_refresh_without_starting_a_login(self):
+        session = self.root / "live_session.json"
+        with patch.object(self.app, "refresh_live_courses") as refresh:
+            self.app._load_saved_live_courses()
+            refresh.assert_not_called()
+            session.write_text("{}", encoding="utf-8")
+            try:
+                self.app._load_saved_live_courses()
+                refresh.assert_called_once()
+            finally:
+                session.unlink()
 
     def test_live_reconnect_clears_partial_preview_and_keeps_confirmed_code(self):
         release = threading.Event()

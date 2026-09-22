@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import copy
+import datetime as dt
 import json
 import math
 import queue
@@ -110,6 +111,8 @@ class App(ctk.CTk):
         self._field_labels = {}
         self._active_audio_source = "system"
         self._monitor_ready = False
+        self._live_courses = []
+        self._live_course_lookup = {}
         self.v_url = ctk.StringVar()
         self.v_user = ctk.StringVar()
         self.v_pwd = ctk.StringVar()
@@ -120,6 +123,7 @@ class App(ctk.CTk):
         self.v_sem = ctk.BooleanVar(value=False)
         self.v_live = ctk.BooleanVar(value=False)
         self.v_follow = ctk.BooleanVar(value=True)
+        self.v_live_course = ctk.StringVar(value="登录后读取当前直播课")
 
         self._body()
         self._load_fields()
@@ -129,12 +133,14 @@ class App(ctk.CTk):
                     self.v_lat, self.v_lng, self.v_auto, self.v_sem, self.v_live):
             var.trace_add("write", self._mark_dirty)
         self.v_live.trace_add("write", self._update_audio_mode)
+        self.v_url.trace_add("write", self._url_edited)
         self.txt_rules.bind("<<Modified>>", self._rules_changed, add="+")
         self.txt_rules.edit_modified(False)
         self.bind("<Control-s>", lambda _: self.save_cfg())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_job = self.after(100, self._poll_log)
         self._tick_job = self.after(1000, self._tick)
+        self._courses_job = self.after(350, self._load_saved_live_courses)
 
     @staticmethod
     def _label(parent, text, size=12, color=design.TXT2, bold=False, family=None, **kw):
@@ -193,7 +199,7 @@ class App(ctk.CTk):
         tabbar.pack(fill="x", padx=22, pady=(0, 22))
         tabbar.grid_columnconfigure((0, 1, 2), weight=1, uniform="tabs")
         for i, (key, title) in enumerate((
-                ("basic", "课堂"), ("rules", "识别"), ("extras", "通知"))):
+                ("basic", "课堂"), ("signin", "签到"), ("extras", "更多"))):
             tab = TabButton(tabbar, text=title, command=lambda k=key: self._select_tab(k))
             tab.grid(row=0, column=i, sticky="ew", padx=(3, 0) if i < 2 else 3, pady=3)
             self._tabs[key] = tab
@@ -223,7 +229,9 @@ class App(ctk.CTk):
                 scrollbar_button_hover_color=design.INPUT_BORDER)
             self._pages[key] = page
         self._basic_page(self._pages["basic"])
-        self._rules_page(self._pages["rules"])
+        self._signin_page(self._pages["signin"])
+        self._rules_page(self._pages["extras"])
+        self._divider(self._pages["extras"], 16)
         self._extras_page(self._pages["extras"])
         self._select_tab("basic")
 
@@ -249,11 +257,45 @@ class App(ctk.CTk):
         return entry
 
     def _basic_page(self, page):
-        self._field(page, "url", "直播网址（选填）", self.v_url,
-                    action=("打开 ↗", self._url_action), bottom=6)
+        self._label(page, "当前直播", 13, design.TXT, True).pack(anchor="w", pady=(0, 8))
+        course_row = ctk.CTkFrame(page, fg_color="transparent")
+        course_row.pack(fill="x", pady=(0, 3))
+        self.live_course_picker = ctk.CTkComboBox(
+            course_row, width=244, height=36, state="disabled",
+            values=[self.v_live_course.get()], variable=self.v_live_course,
+            fg_color=design.INPUT_BG, border_color=design.INPUT_BORDER,
+            button_color=design.RAIL, button_hover_color=design.FOCUS,
+            dropdown_fg_color=design.SURFACE, dropdown_hover_color=design.GHOST_HOVER,
+            dropdown_text_color=design.TXT, text_color=design.TXT2,
+            font=(design.F, 12), dropdown_font=(design.F, 12),
+            command=self._select_live_course)
+        self.live_course_picker.pack(fill="x")
+        course_actions = ctk.CTkFrame(page, fg_color="transparent")
+        course_actions.pack(fill="x", pady=(6, 8))
+        self.b_live_login = self._button(
+            course_actions, "登录直播", self.do_live_login, width=88, height=30,
+            border_color=design.INPUT_BORDER, border_width=1)
+        self.b_live_login.pack(side="left")
+        self.b_course_refresh = self._button(
+            course_actions, "刷新课程", self.refresh_live_courses, width=76, height=30,
+            font=(design.F, 12))
+        self.b_course_refresh.pack(side="right", padx=(8, 0))
+        self._live_course_hint = self._label(
+            page, "先登录直播，再选择课程。无需复制每节课的网址。",
+            11, design.TXT3, wraplength=244, justify="left")
+        self._live_course_hint.pack(fill="x", pady=(0, 10))
+
+        self.b_manual_url = self._button(
+            page, "手动填写网址 ›", self._toggle_manual_url, height=26,
+            anchor="w", font=(design.F, 11))
+        self.b_manual_url.pack(fill="x", pady=(0, 6))
+        self._manual_url = ctk.CTkFrame(page, fg_color="transparent")
+        self._field(self._manual_url, "url", "课程网址（选填）", self.v_url,
+                    action=("打开 ↗", self.open_url), bottom=6)
         self.b_url = self._field_actions["url"]
-        mode = ctk.CTkFrame(page, fg_color="transparent")
-        mode.pack(fill="x", pady=(0, 5))
+
+        mode = self._audio_mode_row = ctk.CTkFrame(page, fg_color="transparent")
+        mode.pack(fill="x", pady=(6, 5))
         switch = Switch(mode, self.v_live)
         switch.pack(side="right")
         self.b_live_account = self._button(
@@ -263,10 +305,17 @@ class App(ctk.CTk):
         label.pack(side="left")
         label.bind("<Button-1>", switch.toggle)
         self._url_hint = self._label(
-            page, "仅用于快捷打开；已在浏览器播放可留空。",
+            page, "已在浏览器播放课程时可留空。",
             11, design.TXT3, wraplength=244, justify="left")
         self._url_hint.pack(fill="x", pady=(0, 4))
-        self._divider(page, (2, 12))
+        self._divider(page, (12, 12))
+        self._switch_row(
+            page, "自动签到", "启动监控时准备签到页，确认码后提交", self.v_auto)
+        self._button(page, "账号与签到设置 →", lambda: self._select_tab("signin"),
+                     height=28, anchor="w", font=(design.F, 11)).pack(fill="x")
+
+    def _signin_page(self, page):
+        self._label(page, "签到账号", 13, design.TXT, True).pack(anchor="w", pady=(0, 10))
         self._field(page, "user", "学号", self.v_user, bottom=12)
         self.e_pwd = self._field(
             page, "pwd", "密码", self.v_pwd, show="•",
@@ -278,9 +327,16 @@ class App(ctk.CTk):
         self.b_login.pack(fill="x")
         self._divider(page, (12, 8))
         self._location_fields(page)
-        self._divider(page, (12, 8))
-        self._switch_row(
-            page, "自动签到", "识别到签到码后自动提交", self.v_auto)
+
+    def _toggle_manual_url(self):
+        self._show_manual_url(not bool(self._manual_url.winfo_manager()))
+
+    def _show_manual_url(self, visible=True):
+        if visible:
+            self._manual_url.pack(fill="x", before=self._audio_mode_row)
+        else:
+            self._manual_url.pack_forget()
+        self.b_manual_url.configure(text="收起手动网址 ‹" if visible else "手动填写网址 ›")
 
     def _rules_page(self, page):
         self._label(page, "签到关键词", 13, design.TXT, True).pack(anchor="w")
@@ -406,7 +462,7 @@ class App(ctk.CTk):
             image=design.ui_icon("copy", 14, design.TXT3), compound="left", state="disabled")
         self.b_copy.pack(side="right")
         self._transcript_hint = self._label(
-            transcript, "播放课程声音后，点击左侧「启动监控」。", 12, design.TXT3)
+            transcript, "选择直播课程或播放网页声音，再点击「启动监控」。", 12, design.TXT3)
         self._transcript_hint.pack(side="bottom", fill="x", padx=24, pady=(0, 16))
         self._transcript = self._label(
             transcript, "准备开始课堂监控", 22, design.TXT,
@@ -465,27 +521,114 @@ class App(ctk.CTk):
             self.v_live.get(),
         )
 
+    @staticmethod
+    def _course_label(course):
+        title = course.title
+        title = title if len(title) <= 12 else title[:11] + "…"
+        when = dt.datetime.fromtimestamp(course.start, dt.timezone(dt.timedelta(hours=8))).strftime("%H:%M")
+        detail = course.teacher or course.classroom
+        detail = detail if len(detail) <= 8 else detail[:7] + "…"
+        suffix = " · ".join(part for part in (when, detail) if part)
+        return f"{title} · {suffix}" if suffix else title
+
+    def _set_live_course_choices(self, courses):
+        self._live_courses = list(courses or [])
+        self._live_course_lookup = {}
+        labels = []
+        for index, course in enumerate(self._live_courses):
+            base = self._course_label(course)
+            label = base if base not in self._live_course_lookup else f"{base} ({index + 1})"
+            self._live_course_lookup[label] = course
+            labels.append(label)
+        if labels:
+            self.live_course_picker.configure(values=labels, state="readonly")
+            from echosign.live import live_course_url
+
+            current = "请选择直播课程"
+            for label, course in self._live_course_lookup.items():
+                try:
+                    if live_course_url(course) == self.v_url.get().strip():
+                        current = label
+                        break
+                except Exception:
+                    continue
+            self.v_live_course.set(current)
+            self._live_course_hint.configure(
+                text=f"找到 {len(labels)} 节直播课，选择后启用后台音频。",
+                text_color=design.TXT3)
+        else:
+            text = "当前没有可选择的直播课"
+            self.live_course_picker.configure(values=[text], state="disabled")
+            self.v_live_course.set(text)
+            self._live_course_hint.configure(
+                text="未找到正在直播的课程，仍可手动粘贴链接。",
+                text_color=design.AMBER)
+
+    def _select_live_course(self, label):
+        if self._task_kind or self._closing:
+            return
+        course = self._live_course_lookup.get(label)
+        if course is None:
+            return
+        from echosign.live import live_course_url
+
+        self.v_live_course.set(label)
+        self.v_url.set(live_course_url(course))
+        self.v_live.set(True)
+        self._entries["url"].invalid = False
+        self._entries["url"].configure(border_color=design.INPUT_BORDER)
+        zone = dt.timezone(dt.timedelta(hours=8))
+        when = dt.datetime.fromtimestamp(course.start, zone).strftime("%H:%M")
+        end = dt.datetime.fromtimestamp(course.end, zone).strftime("%H:%M")
+        details = " · ".join(part for part in (course.teacher, course.classroom, course.section) if part)
+        self._live_course_hint.configure(
+            text=f"{course.title}\n{when}–{end}  {details}\n已选好，点击启动监控。",
+            text_color=design.GREEN)
+
+    def _load_saved_live_courses(self):
+        self._courses_job = None
+        if not self._closing and self._task_kind is None and (CONFIG.parent / "live_session.json").is_file():
+            self.refresh_live_courses()
+
+    def _url_edited(self, *_):
+        from echosign.live import live_course_url
+        selected = self._live_course_lookup.get(self.v_live_course.get())
+        if selected is not None and live_course_url(selected) != self.v_url.get().strip():
+            self.v_live_course.set("请选择直播课程")
+            self._live_course_hint.configure(text="已改为手动地址，或重新选择列表中的课程。",
+                                             text_color=design.TXT3)
+
+    def refresh_live_courses(self):
+        if self._busy():
+            return
+        self._live_course_hint.configure(text="正在读取直播课程…", text_color=design.TXT3)
+        self._live_course_lookup = {}
+        self.v_live_course.set("正在读取直播课程…")
+        self.live_course_picker.configure(state="disabled")
+        self.stop_event.clear()
+
+        def run(cfg):
+            from echosign.live import list_live_courses
+
+            return list_live_courses(cfg, stop=self.stop_event)
+
+        cfg = copy.deepcopy(self.cfg)
+        cfg["live_url"] = self.v_url.get().strip()
+        self._worker(run, cfg, kind="live_courses")
+
     def _update_audio_mode(self, *_):
         direct = self.v_live.get()
-        self._field_labels["url"].configure(text="直播网址" if direct else "直播网址（选填）")
-        self.b_url.configure(
-            text="登录中…" if self._task_kind == "live_login" else "登录直播" if direct else "打开 ↗",
-            state="disabled" if self._closing or (direct and self._task_kind) else "normal")
+        self._field_labels["url"].configure(
+            text="手动直播网址" if direct else "课程网址（选填）")
+        self.b_live_login.configure(
+            text="登录中…" if self._task_kind == "live_login" else "登录直播",
+            state="disabled" if self._closing or self._task_kind else "normal")
         self.b_live_account.configure(
             state="disabled" if self._closing or self._task_kind else "normal")
-        if direct:
-            self.b_live_account.pack(side="right", padx=(0, 8))
-        else:
-            self.b_live_account.pack_forget()
+        self.b_live_account.pack(side="right", padx=(0, 8))
         self._url_hint.configure(text=(
-            "首次登录直播后，直接读取声音。" if direct
-            else "仅用于快捷打开；已在浏览器播放可留空。"))
-
-    def _url_action(self):
-        if self.v_live.get():
-            self.do_live_login()
-        else:
-            self.open_url()
+            "登录直播后，启动监控即可直接读取声音。" if direct
+            else "已在浏览器播放课程时可留空。"))
 
     def _mark_dirty(self, *_):
         if not self._loading:
@@ -506,7 +649,9 @@ class App(ctk.CTk):
             self.logline(f"[!] {message}")
 
     def _field_error(self, key, message):
-        self._select_tab("extras" if key == "hook" else "basic")
+        self._select_tab("extras" if key == "hook" else "basic" if key == "url" else "signin")
+        if key == "url":
+            self._show_manual_url()
         self._entries[key].set_error()
         self._feedback(message, error=True)
         return False
@@ -605,6 +750,8 @@ class App(ctk.CTk):
         self.b_login.configure(state="disabled")
         self.b_test.configure(state="disabled")
         self.b_locate.configure(state="disabled")
+        self.b_course_refresh.configure(state="disabled")
+        self.live_course_picker.configure(state="disabled")
         self._update_audio_mode()
         if kind == "monitor":
             self._t0 = time.monotonic()
@@ -627,11 +774,15 @@ class App(ctk.CTk):
             self.b_locate.configure(text="获取中…")
             self._location_hint.configure(text="正在获取 Windows 位置…", text_color=design.TXT3)
             self._set_status(design.AMBER, "正在定位")
+        elif kind == "live_courses":
+            self.b_course_refresh.configure(text="读取中…")
+            self._set_status(design.AMBER, "读取直播课")
         else:
             self.b_test.configure(text="发送中…")
             self._set_status(design.AMBER, "测试通知")
 
         def run():
+            from echosign.live import LiveError
             failed = False
             result = None
             writer = QueueWriter(self.log_q)
@@ -639,7 +790,7 @@ class App(ctk.CTk):
                 try:
                     result = fn(*args)
                     failed = type(result) is int and result != 0
-                except LocationError as exc:
+                except (LocationError, LiveError) as exc:
                     failed = True
                     result = exc
                     print(f"[!] {exc}")
@@ -694,6 +845,14 @@ class App(ctk.CTk):
                         text=f"已获取{accuracy}。请核对后保存。",
                         text_color=design.AMBER if result.accuracy_m is not None and result.accuracy_m > 1000 else design.TXT3)
                     self.logline(f"[OK] 已获取 Windows 当前位置{accuracy}，请核对后保存。")
+        elif kind == "live_courses":
+            if failed:
+                from echosign.live import LiveError
+                message = str(result) if isinstance(result, LiveError) else "读取直播课程失败，请稍后重试。"
+                self.v_live_course.set("未读取到课程，请登录或刷新")
+                self._live_course_hint.configure(text=message, text_color=design.AMBER)
+            else:
+                self._set_live_course_choices(result)
         self._task_kind = None
         self._t0 = None
         self.worker = None
@@ -703,6 +862,8 @@ class App(ctk.CTk):
         self.b_login.configure(state="normal", text="登录 / 刷新")
         self.b_test.configure(state="normal", text="测试推送")
         self.b_locate.configure(state="normal", text="获取当前位置")
+        self.b_course_refresh.configure(state="normal", text="刷新课程")
+        self.live_course_picker.configure(state="readonly" if self._live_course_lookup else "disabled")
         self._update_audio_mode()
         if failed:
             self._set_status(design.RED, "任务异常")
@@ -711,6 +872,8 @@ class App(ctk.CTk):
             self.logline("[i] 监控已停止。")
         else:
             self._set_status(design.TXT3, "就绪")
+        if kind == "live_login" and not failed and result == 0:
+            self.refresh_live_courses()
 
     def toggle_monitor(self):
         if self._task_kind == "monitor":
@@ -722,8 +885,15 @@ class App(ctk.CTk):
         if self._busy():
             return
         if self.v_live.get() and not self._valid_url(self.v_url.get().strip()):
-            self._field_error("url", "后台音频需要填写直播页面网址")
+            self._field_error("url", "请选择直播课程，或手动填写直播网址")
             return
+        if self.v_live.get():
+            from echosign.live import LiveError, parse_live_page
+            try:
+                parse_live_page(self.v_url.get().strip())
+            except LiveError as exc:
+                self._field_error("url", str(exc))
+                return
         if not self.save_cfg():
             return
         self.stop_event.clear()
@@ -759,19 +929,22 @@ class App(ctk.CTk):
     def do_live_login(self, switch_account=False):
         if self._busy():
             return
-        if not self._valid_url(self.v_url.get().strip()):
-            self._field_error("url", "请先填写直播页面网址")
-            return
         if not self.save_cfg():
             return
         self.stop_event.clear()
+        from echosign.live import LiveError, parse_live_origin
+        url = self.v_url.get().strip()
+        try:
+            parse_live_origin(url)
+        except LiveError:
+            url = "https://course.hdu.edu.cn/#/home"
 
         def run(url):
             from echosign.live import login_live
 
             return login_live(url, self.stop_event, switch_account=switch_account)
 
-        self._worker(run, self.v_url.get().strip(), kind="live_login")
+        self._worker(run, url, kind="live_login")
 
     def test_webhook(self):
         if self._busy():
@@ -979,6 +1152,8 @@ class App(ctk.CTk):
         self.b_locate.configure(state="disabled")
         self.b_url.configure(state="disabled")
         self.b_live_account.configure(state="disabled")
+        self.b_live_login.configure(state="disabled")
+        self.b_course_refresh.configure(state="disabled")
         self._set_status(design.AMBER, "正在关闭")
         self._wait_for_monitor_close()
 
@@ -986,14 +1161,15 @@ class App(ctk.CTk):
         # Wait for attendance cleanup or the bounded system-location helper.
         # Keep Tk responsive rather than abandoning a child process on exit.
         self._close_job = None
-        if self._task_kind in ("monitor", "location", "live_login") and self.worker and self.worker.is_alive():
+        if self._task_kind in ("monitor", "location", "live_login", "live_courses") and self.worker and self.worker.is_alive():
             self._close_job = self.after(100, self._wait_for_monitor_close)
         else:
             self.destroy()
 
     def destroy(self):
         self.stop_event.set()
-        for job in (self._poll_job, self._tick_job, self._copy_job, self._close_job):
+        for job in (self._poll_job, self._tick_job, self._copy_job, self._close_job,
+                    getattr(self, "_courses_job", None)):
             if job:
                 self.after_cancel(job)
         super().destroy()

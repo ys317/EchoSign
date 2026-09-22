@@ -59,6 +59,21 @@ class LiveStream:
     title: str = "直播音频"
 
 
+@dataclass(frozen=True)
+class LiveCourse:
+    """One live lesson returned by the read-only course list endpoint."""
+
+    course_id: str
+    title: str
+    start: float
+    end: float
+    teacher: str = ""
+    classroom: str = ""
+    section: str = ""
+    tecl_id: str = ""
+    origin: str = "https://course.hdu.edu.cn"
+
+
 def _plain(value: object) -> bool:
     return (isinstance(value, str)
             and not any(ord(char) < 32 or ord(char) == 127 for char in value))
@@ -93,6 +108,44 @@ def parse_live_page(page_url: str) -> tuple[str, str]:
             or re.fullmatch(r"[0-9]{1,20}", ids[0]) is None or int(ids[0]) <= 0):
         raise LiveError("请使用正在上课的直播链接；该链接不是有效的单节直播页面。")
     return "https://" + page.hostname, str(int(ids[0]))
+
+
+def parse_live_origin(page_url: str) -> str:
+    """Return a trusted course-site origin from a page or homepage URL."""
+    page = _url(page_url)
+    if (page is None or page.scheme != "https" or page.hostname not in _SITE_HOSTS
+            or page.port not in (None, 443)):
+        raise LiveError("请填写杭电课堂网址。")
+    if page.path not in ("", "/") or page.query:
+        try:
+            return parse_live_page(page_url)[0]
+        except LiveError:
+            # A hash route such as /#/home is still a valid login entry page.
+            if page.fragment and page.path in ("", "/"):
+                return "https://" + page.hostname
+            raise
+    return "https://" + page.hostname
+
+
+def live_course_url(course: LiveCourse) -> str:
+    """Build the canonical page URL consumed by the existing live client."""
+    origin = _url(course.origin)
+    course_id = str(getattr(course, "course_id", ""))
+    tecl_id = str(getattr(course, "tecl_id", "") or "")
+    if (origin is None or origin.scheme != "https" or origin.hostname not in _SITE_HOSTS
+            or origin.port not in (None, 443) or origin.path not in ("", "/")
+            or origin.query or origin.fragment
+            or re.fullmatch(r"[0-9]{1,20}", course_id) is None
+            or int(course_id) <= 0):
+        raise LiveError("直播课程资料无效，请重新刷新课程列表。")
+    query = ["courseId=" + quote(str(int(course_id)), safe=""),
+             "liveId=" + quote(str(int(course_id)), safe="")]
+    if tecl_id:
+        if re.fullmatch(r"[0-9]{1,20}", tecl_id) is None or int(tecl_id) <= 0:
+            raise LiveError("直播课程资料无效，请重新刷新课程列表。")
+        query.append("teclId=" + quote(str(int(tecl_id)), safe=""))
+    query.append("target=live")
+    return "https://" + origin.hostname + "/#/play-center?" + "&".join(query)
 
 
 def _domain_matches(domain: str, host: str) -> bool:
@@ -154,6 +207,191 @@ def _transient_status(value: object) -> bool:
     return isinstance(value, int) and (value in (408, 429) or 500 <= value <= 599)
 
 
+def _saved_auth(origin: str | None = None) -> tuple[str, list[dict], str]:
+    auth = None
+    try:
+        auth = json.loads((application_root() / "live_session.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        pass
+    saved_origin = auth.get("origin") if isinstance(auth, dict) else None
+    parsed = _url(saved_origin)
+    if (parsed is None or parsed.scheme != "https" or parsed.hostname not in _SITE_HOSTS
+            or parsed.port not in (None, 443) or parsed.path not in ("", "/")
+            or parsed.query or parsed.fragment):
+        raise LiveLoginRequired("请先点击“登录直播”，完成本站登录。")
+    saved_origin = "https://" + parsed.hostname
+    if origin is not None and origin != saved_origin:
+        raise LiveLoginRequired("请先点击“登录直播”，完成本站登录。")
+    cookies = _cookies_for_origin(auth.get("cookies"), saved_origin)
+    jwt = auth.get("jwt_token", "")
+    if not _plain(jwt) or not jwt.isascii():
+        raise LiveLoginRequired("直播登录资料无效，请重新点击“登录直播”。")
+    if not cookies and not jwt:
+        raise LiveLoginRequired("直播登录已失效，请重新点击“登录直播”。")
+    return saved_origin, cookies, jwt
+
+
+def _authenticated_session(origin: str, config: dict | None = None) -> tuple[requests.Session, list[dict]]:
+    _, cookies, jwt = _saved_auth(origin)
+    session = requests.Session()
+    # Do not implicitly load unrelated .netrc credentials. Retain the user's
+    # proxy preference explicitly, without changing global network settings.
+    session.trust_env = False
+    options = (config or {}).get("browser") or {}
+    if not options.get("bypass_proxy", False):
+        session.proxies.update(requests.utils.get_environ_proxies(origin))
+    session.headers.update({"User-Agent": _UA,
+                            "Accept": "application/json, text/plain, */*",
+                            "Referer": origin + "/"})
+    if jwt:
+        session.headers["jwt-token"] = jwt
+    for cookie in cookies:
+        session.cookies.set(
+            cookie["name"], cookie["value"], domain=cookie["domain"], path=cookie["path"],
+            secure=cookie["secure"],
+            expires=int(cookie["expires"]) if cookie["expires"] not in (None, -1) else None)
+    return session, cookies
+
+
+def _checked_payload(response, *, action: str) -> dict:
+    try:
+        if response.status_code in (301, 302, 303, 307, 308, 401):
+            raise LiveLoginRequired("请先点击“登录直播”，完成本站登录。")
+        if response.status_code == 403:
+            raise LiveError("当前账号无权读取直播课程。" if action == "list" else "当前账号无权观看这节直播。")
+        if _transient_status(response.status_code):
+            raise LiveTransientError("课堂直播平台暂时无法读取课程，请稍后重试。" if action == "list"
+                                     else "课堂直播平台暂时无法提供音频，请稍后重试。")
+        if response.status_code != 200:
+            raise LiveError("课堂直播平台暂时无法读取课程，请稍后重试。" if action == "list"
+                            else "课堂直播平台暂时无法提供音频，请稍后重试。")
+        payload = None
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            pass
+        if not isinstance(payload, dict):
+            raise LiveError("无法解析直播课程，请重新登录直播后重试。" if action == "list"
+                            else "无法解析直播状态，请重新登录直播后重试。")
+        return payload
+    finally:
+        response.close()
+
+
+def _list_origin(config: dict | None) -> str:
+    value = str((config or {}).get("live_url") or "").strip()
+    if value:
+        try:
+            return parse_live_origin(value)
+        except LiveError:
+            pass
+    return _saved_auth()[0]
+
+
+def _text(value: object) -> str:
+    return value.strip() if _plain(value) else ""
+
+
+def _teacher(record: dict) -> str:
+    names = record.get("teacNames")
+    if isinstance(names, list):
+        clean = [_text(name) for name in names]
+        return "、".join(name for name in clean if name)
+    return _text(record.get("tecName"))
+
+
+def _normalise_course(record: object, origin: str) -> LiveCourse | None:
+    if not isinstance(record, dict):
+        return None
+    course_id = record.get("id", record.get("courseId"))
+    if (isinstance(course_id, bool) or re.fullmatch(r"[0-9]{1,20}", str(course_id or "")) is None
+            or int(course_id) <= 0):
+        return None
+    start, end = _timestamp(record.get("courBeginTime")), _timestamp(record.get("courEndTime"))
+    if start is None or end is None or end <= start:
+        return None
+    title = _text(record.get("courName")) or _text(record.get("subjName"))
+    if not title:
+        return None
+    tecl_id = record.get("teclId")
+    if (isinstance(tecl_id, bool) or tecl_id in (None, "")
+            or re.fullmatch(r"[0-9]{1,20}", str(tecl_id)) is None or int(tecl_id) <= 0):
+        tecl_id = ""
+    else:
+        tecl_id = str(int(tecl_id))
+    section = ""
+    number = record.get("letiNumber")
+    if not isinstance(number, bool) and isinstance(number, (int, float, str)):
+        raw = str(number).strip()
+        if re.fullmatch(r"[0-9]{1,3}(?:\.0+)?", raw) and int(float(raw)) > 0:
+            section = f"第{int(float(raw))}节"
+    return LiveCourse(str(int(course_id)), title, start, end, _teacher(record),
+                      _text(record.get("clroName")), section, tecl_id, origin)
+
+
+def _course_list_page(session, origin: str, page: int) -> dict:
+    try:
+        response = session.get(
+            origin + _API + "/v1/vod_live/t-1",
+            params={"page.pageIndex": page, "page.pageSize": 1000,
+                    "page.orders[0].asc": "true",
+                    "page.orders[0].field": "courBeginTime", "liveDay": 0},
+            timeout=(10, 15), allow_redirects=False)
+    except requests.exceptions.SSLError:
+        raise LiveError("课堂直播平台的安全连接验证失败，请检查系统时间或联系平台。") from None
+    except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError):
+        raise LiveTransientError("无法连接课堂直播平台，请检查网络后重试。") from None
+    except (requests.RequestException, OSError, ValueError):
+        raise LiveError("无法读取直播课程，请检查网络和直播登录状态。") from None
+    payload = _checked_payload(response, action="list")
+    if _status(payload.get("status"), 401) or _status(payload.get("code"), 401):
+        raise LiveLoginRequired("直播登录已失效，请重新点击“登录直播”。")
+    if _status(payload.get("status"), 403) or _status(payload.get("code"), 403):
+        raise LiveError("当前账号无权读取直播课程。")
+    if _transient_status(payload.get("status")) or _transient_status(payload.get("code")):
+        raise LiveTransientError("课堂直播平台暂时无法读取课程，请稍后重试。")
+    data = payload.get("data")
+    if (not _status(payload.get("status"), 200) or payload.get("ok") is False
+            or not isinstance(data, dict) or not isinstance(data.get("records"), list)):
+        raise LiveError("课堂直播平台未返回有效课程列表，请重新登录直播后重试。")
+    return data
+
+
+def list_live_courses(config: dict | None = None, *, stop=None) -> list[LiveCourse]:
+    """Return the current account's live lessons without opening a playback page."""
+    origin = _list_origin(config)
+    session, cookies = _authenticated_session(origin, config)
+    try:
+        unique = {}
+        received = 0
+        previous_ids = None
+        for page in range(1, 21):
+            if stop is not None and stop.is_set():
+                raise LiveError("读取直播课程已取消。")
+            data = _course_list_page(session, origin, page)
+            if stop is not None and stop.is_set():
+                raise LiveError("读取直播课程已取消。")
+            records = data["records"]
+            received += len(records)
+            courses = [course for course in (_normalise_course(record, origin) for record in records)
+                       if course is not None]
+            ids = tuple(course.course_id for course in courses)
+            if records and ids == previous_ids:
+                raise LiveError("直播课程分页未更新，请稍后刷新。")
+            previous_ids = ids
+            unique.update((course.course_id, course) for course in courses)
+            total = data.get("total")
+            if (not records or (type(total) is int and 0 <= total <= received)
+                    or (type(total) is not int and len(records) < 1000)):
+                return sorted(unique.values(), key=lambda course: (course.start, course.end, course.course_id))
+        raise LiveError("直播课程过多，暂时无法完整读取，请稍后刷新或手动填写网址。")
+    finally:
+        session.headers.pop("jwt-token", None)
+        session.cookies.clear()
+        session.close()
+        cookies.clear()
+
+
 class LiveClient:
     """Only GET the live-info endpoint; never send viewing records or heartbeats."""
 
@@ -161,36 +399,7 @@ class LiveClient:
 
     def __init__(self, page_url: str, config: dict | None = None):
         self.origin, self.course_id = parse_live_page(page_url)
-        auth = None
-        try:
-            auth = json.loads((application_root() / "live_session.json").read_text(encoding="utf-8-sig"))
-        except (OSError, ValueError):
-            pass
-        if not isinstance(auth, dict) or auth.get("origin") != self.origin:
-            raise LiveLoginRequired("请先点击“登录直播”，完成本站登录。")
-        self._cookies = _cookies_for_origin(auth.get("cookies"), self.origin)
-        jwt = auth.get("jwt_token", "")
-        if not _plain(jwt) or not jwt.isascii():
-            raise LiveLoginRequired("直播登录资料无效，请重新点击“登录直播”。")
-        if not self._cookies and not jwt:
-            raise LiveLoginRequired("直播登录已失效，请重新点击“登录直播”。")
-        self._session = requests.Session()
-        # Do not implicitly load unrelated .netrc credentials. Retain the user's
-        # proxy preference explicitly, without changing global network settings.
-        self._session.trust_env = False
-        options = (config or {}).get("browser") or {}
-        if not options.get("bypass_proxy", False):
-            self._session.proxies.update(requests.utils.get_environ_proxies(self.origin))
-        self._session.headers.update({"User-Agent": _UA,
-                                      "Accept": "application/json, text/plain, */*",
-                                      "Referer": self.origin + "/"})
-        if jwt:
-            self._session.headers["jwt-token"] = jwt
-        for cookie in self._cookies:
-            self._session.cookies.set(
-                cookie["name"], cookie["value"], domain=cookie["domain"], path=cookie["path"],
-                secure=cookie["secure"],
-                expires=int(cookie["expires"]) if cookie["expires"] not in (None, -1) else None)
+        self._session, self._cookies = _authenticated_session(self.origin, config)
         self._closed = False
 
     def __enter__(self):
@@ -224,25 +433,7 @@ class LiveClient:
             pass
         if response is None:
             raise failure_type(failure_message)
-        try:
-            if response.status_code in (301, 302, 303, 307, 308, 401):
-                raise LiveLoginRequired("直播登录已失效，请重新点击“登录直播”。")
-            if response.status_code == 403:
-                raise LiveError("当前账号无权观看这节直播。")
-            if _transient_status(response.status_code):
-                raise LiveTransientError("课堂直播平台暂时无法提供音频，请稍后重试。")
-            if response.status_code != 200:
-                raise LiveError("课堂直播平台暂时无法提供音频，请稍后重试。")
-            payload = None
-            try:
-                payload = response.json()
-            except (ValueError, TypeError):
-                pass
-            if not isinstance(payload, dict):
-                raise LiveError("无法解析直播状态，请重新登录直播后重试。")
-            return payload
-        finally:
-            response.close()
+        return _checked_payload(response, action="resolve")
 
     def resolve(self) -> LiveStream:
         if self._closed:
@@ -393,7 +584,7 @@ def _save_session(origin: str, cookies: list[dict], jwt: str,
 
 def login_live(page_url: str, stop=None, *, switch_account: bool = False) -> int:
     """Keep manual account selection on later logins without reusing old profiles."""
-    origin, _ = parse_live_page(page_url)
+    origin = parse_live_origin(page_url)
     if stop is not None and stop.is_set():
         print("直播登录已取消。")
         return 1

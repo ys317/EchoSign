@@ -25,6 +25,31 @@ def wait_for(predicate, seconds=3):
 
 
 class PreparedSchedulerTests(unittest.TestCase):
+    def test_system_monitor_prepares_before_loading_models_and_closes_on_failure(self):
+        from echosign import monitor
+        signer = Mock()
+        with patch.object(monitor, "LoopbackSource"), \
+                patch.object(monitor, "make_alerter"), \
+                patch.object(monitor, "make_auto_signer", return_value=signer), \
+                patch.object(monitor, "build_matchers", return_value=[]), \
+                patch.object(monitor, "make_watcher"), \
+                patch.object(monitor, "make_engine") as engine, redirect_stdout(StringIO()):
+            def fail(cfg):
+                signer.prepare.assert_called_once()
+                signer.submit.assert_not_called()
+                raise RuntimeError("model unavailable")
+            engine.side_effect = fail
+            with self.assertRaisesRegex(RuntimeError, "model unavailable"):
+                monitor.cmd_run({})
+        signer.close.assert_called_once()
+
+    def test_disabled_prewarm_does_not_launch_a_browser(self):
+        signer = AutoSigner(Mock(), prewarm_browser=False)
+        with patch("echosign.attendance._BrowserSession") as session:
+            self.assertFalse(signer.prepare())
+            signer.close()
+        session.assert_not_called()
+
     def test_preparation_does_not_submit_and_two_codes_reuse_one_session(self):
         ready, first, second = threading.Event(), threading.Event(), threading.Event()
         session = Mock()

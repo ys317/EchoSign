@@ -19,6 +19,22 @@ from echosign import gui as ui  # noqa: E402
 
 
 class DemoApp(ui.App):
+    def __init__(self):
+        super().__init__()
+        self.refresh_live_courses()
+
+    def _load_saved_live_courses(self):
+        self._courses_job = None
+
+    def refresh_live_courses(self):
+        from echosign.live import LiveCourse
+        self._set_live_course_choices([
+            LiveCourse("123", "计算机网络", 1790038500, 1790041200,
+                       teacher="王老师", classroom="教学楼 201", section="第2节", tecl_id="456"),
+            LiveCourse("124", "数据库原理", 1790038500, 1790041200, teacher="李老师"),
+        ])
+        self._select_live_course(next(iter(self._live_course_lookup)))
+
     def start_monitor(self):
         if self._busy() or not self.save_cfg():
             return
@@ -150,7 +166,7 @@ def main():
     shots.add_argument("--preview", action="store_true")
     shots.add_argument("--output", type=Path, default=ROOT / "assets/screenshots")
     shots.add_argument("--scale", type=float, default=1.5)
-    shots.add_argument("--page", choices=("basic", "rules", "extras"), default="basic")
+    shots.add_argument("--page", choices=("basic", "signin", "extras"), default="basic")
     args = parser.parse_args()
     if args.command == "icon":
         generate_icon()

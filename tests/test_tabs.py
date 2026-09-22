@@ -52,7 +52,7 @@ class TabTests(unittest.TestCase):
         canvas.yview_moveto(.4)
         app.update_idletasks()
         scroll = canvas.yview()
-        for key in ("rules", "extras", "basic") * 3:
+        for key in ("signin", "extras", "basic") * 3:
             app._select_tab(key)
             app.update()
             self.assertTrue(app._pages[key].winfo_viewable())
@@ -76,7 +76,7 @@ class TabTests(unittest.TestCase):
                 for theme in ("light", "dark"):
                     if app._appearance != theme:
                         app.toggle_theme()
-                    for key in ("extras", "rules", "basic"):
+                    for key in ("extras", "signin", "basic"):
                         app._select_tab(key)
                         app.update_idletasks()
                         for name, button in app._tabs.items():

@@ -66,7 +66,7 @@ code_watch:
 auto_sign:
   enabled: true            # 听到签到码后自动打开浏览器完成签到(依赖 browser_profile 登录态)
   timeout_seconds: 180
-  prewarm_browser: true  # 签到提示或候选码出现时先打开签到页，确认码后才输入并提交
+  prewarm_browser: true  # 启动监控时打开签到页，确认码后才输入并提交
 
 # ====== 浏览器网络 ======
 browser:

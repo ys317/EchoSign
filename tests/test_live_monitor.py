@@ -128,6 +128,19 @@ class LiveMonitorTests(unittest.TestCase):
         f.make_asr.assert_called_once()
         f.source.assert_called_once()
 
+    def test_signin_page_prepares_before_live_lookup_and_reuses_the_session(self):
+        with ExitStack() as stack:
+            f = self.setup_pipeline(stack)
+            def resolve():
+                f.signer.prepare.assert_called_once()
+                f.make_asr.assert_not_called()
+                f.signer.submit.assert_not_called()
+                return f.stream
+            f.client.resolve.side_effect = resolve
+            monitor.cmd_run_live(self.cfg, self.stop)
+        f.signer.prepare.assert_called_once()
+        f.signer.close.assert_called_once()
+
     def test_api_outage_during_reconnect_is_inside_the_recovery_window(self):
         connections = []
 
@@ -255,7 +268,9 @@ class LiveMonitorTests(unittest.TestCase):
                     monitor.cmd_run_live(self.cfg, self.stop)
                 f.source.assert_not_called()
                 f.make_asr.assert_not_called()
-                f.make_signer.assert_not_called()
+                f.signer.prepare.assert_called_once()
+                f.signer.submit.assert_not_called()
+                f.signer.close.assert_called_once()
         self.assertEqual(self.stop.waits, [])
 
     def test_expired_login_during_recovery_does_not_open_a_browser_or_retry(self):

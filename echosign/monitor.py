@@ -156,12 +156,16 @@ def cmd_run(cfg: dict, stop=None) -> None:
     stop = stop if stop is not None else threading.Event()
     if (cfg.get("live_audio") or {}).get("enabled", False):
         return cmd_run_live(cfg, stop)
+    if stop.is_set():
+        return
     chunk = float(cfg.get("chunk_seconds", 0.25))
     src = LoopbackSource(cfg.get("device") or None, chunk)
     print(f"[i] 正在监听输出设备: {src.speaker_name} (内录环回)")
     alerter = make_alerter(cfg)
     auto = make_auto_signer(cfg, alerter, stop)
     try:
+        if auto is not None:
+            auto.prepare()
         matchers = build_matchers(cfg)
         watcher = make_watcher(cfg, alerter, auto, stop)
         print(f"[i] 匹配器: {[type(m).__name__ for m in matchers]}")
@@ -205,6 +209,10 @@ def cmd_run_live(cfg: dict, stop=None) -> None:
 
     try:
         with LiveClient(str(cfg.get("live_url") or ""), cfg) as client:
+            alerter = make_alerter(cfg)
+            auto = make_auto_signer(cfg, alerter, stop)
+            if auto is not None:
+                auto.prepare()
             print("[i] 直播状态: 正在连接")
             while not stop.is_set():
                 if recovery_expired():
@@ -219,12 +227,10 @@ def cmd_run_live(cfg: dict, stop=None) -> None:
                         raise recovery_failed() from None
                     if asr is None:
                         print("[i] 正在准备直播音频识别，无需网页播放")
-                        alerter = make_alerter(cfg)
                         matchers = build_matchers(cfg)
                         asr = make_engine(cfg)
                         if stop.is_set():
                             return
-                        auto = make_auto_signer(cfg, alerter, stop)
                         watcher = make_watcher(cfg, alerter, auto, stop)
                     source = FFmpegAudioSource(
                         stream.url, headers=stream.headers,
