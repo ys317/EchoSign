@@ -4,7 +4,7 @@
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0078D4)
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-面向**杭州电子科技大学「上课啦」**的 Windows 课堂辅助工具。将课堂声音实时转为文字，识别签到提示与四位口播签到码，并提供可选的企业微信通知和浏览器签到辅助。
+面向杭电(杭州电子科技大学)「上课啦」的 Windows 课堂辅助工具。将课堂声音实时转为文字，识别签到提示与四位口播签到码，并提供可选的企业微信通知和浏览器签到辅助。
 
 [下载 Windows 版](https://github.com/ys317/EchoSign/releases/latest) · [快速开始](#快速开始) · [使用指南](docs/usage.md) · [问题反馈](https://github.com/ys317/EchoSign/issues)
 
