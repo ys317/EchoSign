@@ -9,7 +9,9 @@ ApplicationWindow {
     visible: true
     width: 1180; height: 760
     minimumWidth: 960; minimumHeight: 600
-    title: appController.state.version
+    // Keep the native title bar quiet; version and executable identity belong
+    // in diagnostics/about information rather than the working surface.
+    title: ""
     color: Theme.canvas
     property bool collapsed: false
     property bool settingsVisible: false
@@ -63,7 +65,6 @@ ApplicationWindow {
                     background: Rectangle { color: Theme.surface; radius: 4; border.width: 1; border.color: Theme.border }
                     contentItem: Column {
                         UiButton { width: parent.width; text: "账号设置"; alignLeft: true; onClicked: { accountMenu.close(); window.collapsed = false; window.settingsVisible = true } }
-                        UiButton { width: parent.width; text: "切换直播账号"; alignLeft: true; enabled: !appController.state.busy; onClicked: { accountMenu.close(); appController.login(true) } }
                     }
                 }
             }
@@ -130,9 +131,6 @@ ApplicationWindow {
                             UiText { width: parent.width; text: "•  " + courseDelegate.entry.summary; font.pixelSize: 12; color: Theme.muted; elide: Text.ElideRight }
                             UiText { visible: text.length > 0; width: parent.width; text: courseDelegate.entry.detail; font.pixelSize: 12; color: Theme.muted; elide: Text.ElideRight }
                         }
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 700
-                        ToolTip.text: entry.title + "\n" + entry.fullTime + "\n" + entry.detail
                     }
                 }
                 UiText { id: courseHint; width: parent.width; text: appController.state.courseHint; wrapMode: Text.Wrap; color: Theme.subtle; font.pixelSize: 11; lineHeight: 1.5 }
@@ -172,8 +170,6 @@ ApplicationWindow {
             height: 40; width: parent.width
             Row {
                 x: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 4
-                UiButton { text: "HDUSign"; height: 28; onClicked: { window.settingsVisible = false; documentScroll.contentY = 0 } }
-                UiText { text: "/"; color: Theme.subtle; height: 28 }
                 UiButton {
                     objectName: "pageBreadcrumb"
                     text: window.settingsVisible ? "设置" : "课堂监控"

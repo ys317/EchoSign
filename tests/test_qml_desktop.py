@@ -125,6 +125,10 @@ class QmlDesktopTests(unittest.TestCase):
         self.assertIsNotNone(self.item('navLive'))
         self.assertIsNotNone(self.item('monitorButton'))
 
+    def test_window_identity_and_course_hover_are_not_exposed(self):
+        self.assertEqual(self.window.property('title'), '')
+        self.assertEqual(self.item('pageBreadcrumb').property('text'), '课堂监控')
+
     def test_monitor_stop_and_close_complete_without_blocking_window(self):
         self.click('monitorButton')
         self.assertEqual(self.c._task, 'monitor')
