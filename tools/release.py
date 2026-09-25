@@ -27,9 +27,9 @@ from urllib3.util.retry import Retry
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from echosign import __version__
-from echosign.processes import hidden_subprocess_options
-from echosign.runtime import (ASR_FILES, ASR_FOLDER, FFMPEG_FILES, SEMANTIC_FILES,
+from hdusign import __version__
+from hdusign.processes import hidden_subprocess_options
+from hdusign.runtime import (ASR_FILES, ASR_FOLDER, FFMPEG_FILES, SEMANTIC_FILES,
                               SEMANTIC_FOLDER, SEMANTIC_MODEL, check_ffmpeg_runtime)
 
 BUILD = ROOT / "build"
@@ -78,7 +78,7 @@ def prepare_ffmpeg(bundle: Path) -> dict:
                 or metadata.get("license") != "LGPL-2.1-or-later"
                 or metadata.get("tls_backend") != "schannel"
                 or metadata.get("corresponding_source_included") is not True):
-            raise RuntimeError("Use the EchoSign FFmpeg audio build with its complete matching source.")
+            raise RuntimeError("Use the HDUSign FFmpeg audio build with its complete matching source.")
         source = metadata.get("source_archive") or {}
         name = source.get("name", "")
         if not name or Path(name).name != name or not name.endswith("-source.tar.xz"):
@@ -186,7 +186,7 @@ def prepare_semantic_model() -> None:
 def source_hashes() -> dict[str, str]:
     paths = [ROOT / name for name in ("requirements.txt", "config.example.yaml", "README.md", "LICENSE")]
     generated = tuple(ROOT / "tools" / "ffmpeg-build" / name for name in ("downloads", "work", "dist"))
-    for folder in ("echosign", "assets", "docs", "tools", "tests", ".github"):
+    for folder in ("hdusign", "assets", "docs", "tools", "tests", ".github"):
         paths.extend(p for p in (ROOT / folder).rglob("*")
                      if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".jsonl"
                      and not any(p.is_relative_to(directory) for directory in generated))
@@ -250,7 +250,7 @@ def verify_archive(archive: Path) -> dict:
                    PLAYWRIGHT_BROWSERS_PATH=str(profile / "absent-browser-cache"),
                    PATH=os.pathsep.join([str(system_root / "System32"), str(system_root)]))
         report = workspace / "runtime.json"
-        result = subprocess.run([str(workspace / "EchoSign" / "EchoSign.exe"),
+        result = subprocess.run([str(workspace / "HDUSign" / "HDUSign.exe"),
                                  "--check-runtime", str(report)],
                                 cwd=workspace, env=env, stdin=subprocess.DEVNULL,
                                 capture_output=True, timeout=240, **hidden_subprocess_options())
@@ -265,6 +265,8 @@ def verify_archive(archive: Path) -> dict:
             raise RuntimeError("Packaged version does not match the source")
         if not content.get("ffmpeg"):
             raise RuntimeError("Packaged FFmpeg did not pass the offline audio check")
+        if not content.get("desktop", {}).get("qml"):
+            raise RuntimeError("Packaged Qt Quick desktop did not pass the rendering check")
         return content
 
 
@@ -280,12 +282,12 @@ def write_version_resource() -> None:
         raise ValueError("Windows versions must have one to four numeric components")
     version = parts + (0,) * (4 - len(parts))
     strings = {
-        "FileDescription": "EchoSign 课堂辅助工具",
+        "FileDescription": "HDUSign 课堂辅助工具",
         "FileVersion": ".".join(map(str, version)),
-        "InternalName": "EchoSign",
+        "InternalName": "HDUSign",
         "LegalCopyright": "Copyright (c) 2026 ys317",
-        "OriginalFilename": "EchoSign.exe",
-        "ProductName": "EchoSign",
+        "OriginalFilename": "HDUSign.exe",
+        "ProductName": "HDUSign",
         "ProductVersion": __version__,
     }
     resource = VSVersionInfo(
@@ -314,10 +316,10 @@ def build_release(ffmpeg_bundle: Path) -> None:
     with log.open("w", encoding="utf-8") as stream:
         subprocess.run([sys.executable, "-X", "utf8", "-m", "PyInstaller", "--noconfirm", "--clean",
                         "--distpath", str(DIST), "--workpath", str(BUILD / "pyinstaller" / VERSION),
-                        str(ROOT / "tools" / "EchoSign.spec")],
+                        str(ROOT / "tools" / "HDUSign.spec")],
                        cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream,
                        stderr=subprocess.STDOUT, check=True, **hidden_subprocess_options())
-    app = DIST / "EchoSign"
+    app = DIST / "HDUSign"
     packaged_ffmpeg = app / "_internal" / "ffmpeg"
     require_files(packaged_ffmpeg, FFMPEG_FILES)
     if sha256(packaged_ffmpeg / "ffmpeg.exe") != ffmpeg["binary_sha256"]:
@@ -333,7 +335,7 @@ def build_release(ffmpeg_bundle: Path) -> None:
         raise RuntimeError("Source files changed during the build; rebuild before publishing")
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    archive = OUTPUT / f"EchoSign-{VERSION}-win64.zip"
+    archive = OUTPUT / f"HDUSign-{VERSION}-win64.zip"
     print(f"Creating {archive.name}", flush=True)
     forbidden = {"config.yaml", "secrets_local.json", "session_local.json", "browser_profile",
                  "live_session.json", "live_profile"}
@@ -481,7 +483,7 @@ def publish_release(notes_path: Path) -> None:
     api = "https://api.github.com/repos/" + match[1]
 
     manifest = json.loads((BUILD / f"release-{VERSION}-manifest.json").read_text(encoding="utf-8"))
-    archive = OUTPUT / f"EchoSign-{VERSION}-win64.zip"
+    archive = OUTPUT / f"HDUSign-{VERSION}-win64.zip"
     source = manifest["ffmpeg"]["source_archive"]
     source_archive = OUTPUT / source["name"]
     if not source_archive.is_file() or sha256(source_archive) != source["sha256"]:
@@ -508,7 +510,7 @@ def publish_release(notes_path: Path) -> None:
         release = find_release(client, api, VERSION)
         if release is None:
             release = checked(client.post(api + "/releases", timeout=30, json={
-                "tag_name": VERSION, "target_commitish": commit, "name": f"EchoSign {VERSION}",
+                "tag_name": VERSION, "target_commitish": commit, "name": f"HDUSign {VERSION}",
                 "draft": True, "prerelease": False, "body": notes}))
         print(f"Release {release['id']}: {VERSION}, draft={release['draft']}", flush=True)
         existing = {asset["name"]: asset for asset in release["assets"]}

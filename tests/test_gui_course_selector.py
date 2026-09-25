@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import unittest
 
-from echosign import gui
-from echosign.live import LiveCourse, live_course_url
+from hdusign import gui
+from hdusign.live import LiveCourse, live_course_url
 
 
 class _Var:
@@ -38,11 +38,13 @@ class LiveCourseSelectorTests(unittest.TestCase):
         self.app._scheduled_course = None
         self.app._task_kind = None
         self.app._closing = False
-        self.app.live_course_picker = _Widget()
         self.app._live_course_hint = _Widget()
         self.app.b_monitor = _Widget()
         self.app.v_live_course = _Var()
         self.app.v_url = _Var()
+        self.renders = []
+        self.app._render_course_list = lambda: self.renders.append("render")
+        self.app._refresh_course_cards = lambda: self.renders.append("style")
 
     def test_course_label_contains_time_and_teacher_without_growing_forever(self):
         course = LiveCourse(
@@ -60,7 +62,7 @@ class LiveCourseSelectorTests(unittest.TestCase):
         self.assertEqual(self.app.v_live_course.get(), "请选择直播课程")
         self.assertEqual(self.app.v_url.get(), "")
         label = next(iter(self.app._live_course_lookup))
-        self.assertEqual(self.app.live_course_picker.calls[-1]["state"], "readonly")
+        self.assertEqual(self.renders, ["render"])
         self.assertEqual(self.app._live_course_lookup[label], course)
 
         self.app._entries = {"url": _Entry()}
@@ -72,7 +74,8 @@ class LiveCourseSelectorTests(unittest.TestCase):
 
     def test_empty_results_keep_manual_url_fallback(self):
         self.app._set_live_course_choices([])
-        self.assertEqual(self.app.live_course_picker.calls[-1]["state"], "disabled")
+        self.assertEqual(self.app.v_live_course.get(), "当前没有可选择的直播课")
+        self.assertEqual(self.renders, ["render"])
         self.assertIn("手动粘贴", self.app._live_course_hint.calls[-1]["text"])
 
     def test_selection_cannot_change_the_course_during_monitoring(self):

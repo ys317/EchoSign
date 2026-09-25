@@ -1,9 +1,9 @@
 """Entry point.
 
-  python -m echosign devices        # 列出可用输出设备
-  python -m echosign run            # 启动监控
-  python -m echosign test FILE.wav  # 识别音频文件
-  python -m echosign demo           # 检查规则匹配
+  python -m hdusign devices        # 列出可用输出设备
+  python -m hdusign run            # 启动监控
+  python -m hdusign test FILE.wav  # 识别音频文件
+  python -m hdusign demo           # 检查规则匹配
 """
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ import time
 
 import yaml
 
-from echosign.alert import Alerter
-from echosign.attendance import make_auto_signer
-from echosign.audio import SAMPLE_RATE, LoopbackSource, StreamingASR, WavFileSource
-from echosign.rules import RuleMatcher, SignInWatcher, build_matchers, extract_codes
+from hdusign.alert import Alerter
+from hdusign.attendance import make_auto_signer
+from hdusign.audio import SAMPLE_RATE, LoopbackSource, StreamingASR, WavFileSource
+from hdusign.rules import RuleMatcher, SignInWatcher, build_matchers, extract_codes
 
 
 def load_config(path: str) -> dict:
@@ -185,8 +185,8 @@ def cmd_run(cfg: dict, stop=None) -> None:
 
 def cmd_run_live(cfg: dict, stop=None) -> None:
     """Read a single live stream without a playing browser or loopback capture."""
-    from echosign.live import LiveClient, LiveEnded, LiveError
-    from echosign.media import FFmpegAudioSource, MediaError, find_ffmpeg
+    from hdusign.live import LiveClient, LiveEnded, LiveError
+    from hdusign.media import FFmpegAudioSource, MediaError, find_ffmpeg
 
     stop = stop if stop is not None else threading.Event()
     if stop.is_set():
@@ -295,7 +295,7 @@ def cmd_run_live(cfg: dict, stop=None) -> None:
                     if getattr(exc, "kind", "") == "auth":
                         auth_failures += 1
                     if auth_failures >= 2:
-                        raise MediaError("直播授权无法刷新，请点击“登录直播”后重试。", kind="terminal") from None
+                        raise MediaError("直播授权无法刷新，请点击“登录并读取课程”后重试。", kind="terminal") from None
                     last_error = str(exc)
                     now = time.monotonic()
                     if outage_started is None:
@@ -362,9 +362,9 @@ def cmd_webhook_test(cfg: dict) -> None:
     if not alerter.webhook_url:
         print("config.yaml 里 alert.webhook.url 为空, 请先填入机器人 Webhook 地址")
         return
-    print("正在发送 EchoSign 测试推送…")
-    alerter._send_wechat(time.strftime("%H:%M:%S"), "test", "EchoSign 测试推送",
-                         "这是一条 EchoSign 测试消息，收到说明企业微信推送正常。")
+    print("正在发送 HDUSign 测试推送…")
+    alerter._send_wechat(time.strftime("%H:%M:%S"), "test", "HDUSign 测试推送",
+                         "这是一条 HDUSign 测试消息，收到说明企业微信推送正常。")
 
 
 def cmd_code() -> None:
@@ -382,7 +382,7 @@ def cmd_code() -> None:
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="echosign")
+    p = argparse.ArgumentParser(prog="hdusign")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("devices")
     prun = sub.add_parser("run")

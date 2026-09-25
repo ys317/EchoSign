@@ -11,9 +11,9 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from echosign import browser
-from echosign.__main__ import main as app_main
-from echosign.attendance import AutoSigner, SignResult, _BrowserSession, write_json
+from hdusign import browser
+from hdusign.__main__ import main as app_main
+from hdusign.attendance import AutoSigner, SignResult, _BrowserSession, write_json
 
 
 def wait_for(predicate, seconds=3):
@@ -26,7 +26,7 @@ def wait_for(predicate, seconds=3):
 
 class PreparedSchedulerTests(unittest.TestCase):
     def test_system_monitor_prepares_before_loading_models_and_closes_on_failure(self):
-        from echosign import monitor
+        from hdusign import monitor
         signer = Mock()
         with patch.object(monitor, "LoopbackSource"), \
                 patch.object(monitor, "make_alerter"), \
@@ -45,7 +45,7 @@ class PreparedSchedulerTests(unittest.TestCase):
 
     def test_disabled_prewarm_does_not_launch_a_browser(self):
         signer = AutoSigner(Mock(), prewarm_browser=False)
-        with patch("echosign.attendance._BrowserSession") as session:
+        with patch("hdusign.attendance._BrowserSession") as session:
             self.assertFalse(signer.prepare())
             signer.close()
         session.assert_not_called()
@@ -60,7 +60,7 @@ class PreparedSchedulerTests(unittest.TestCase):
         session.submit.side_effect = submit
         signer = AutoSigner(Mock(), prewarm_browser=True)
         self.addCleanup(signer.close)
-        with patch("echosign.attendance._BrowserSession", return_value=session) as factory, redirect_stdout(StringIO()):
+        with patch("hdusign.attendance._BrowserSession", return_value=session) as factory, redirect_stdout(StringIO()):
             self.assertTrue(signer.prepare())
             self.assertTrue(ready.wait(2))
             signer.prepare()
@@ -96,7 +96,7 @@ class PreparedSchedulerTests(unittest.TestCase):
         session.open.side_effect = fail
         signer = AutoSigner(Mock(), prewarm_browser=True)
         self.addCleanup(signer.close)
-        with patch("echosign.attendance._BrowserSession", return_value=session) as factory, \
+        with patch("hdusign.attendance._BrowserSession", return_value=session) as factory, \
                 patch.object(signer, "_sign_one") as sign, redirect_stdout(StringIO()):
             signer.prepare()
             self.assertTrue(failed.wait(2))
@@ -118,7 +118,7 @@ class PreparedSchedulerTests(unittest.TestCase):
         signer = AutoSigner(Mock(), stop=stop, prewarm_browser=True)
         self.addCleanup(signer.close)
         self.addCleanup(stop.set)
-        with patch("echosign.attendance._BrowserSession", return_value=session), redirect_stdout(StringIO()):
+        with patch("hdusign.attendance._BrowserSession", return_value=session), redirect_stdout(StringIO()):
             signer.prepare()
             self.assertTrue(entered.wait(2))
             signer.submit("1234")
@@ -160,7 +160,7 @@ class WorkerProtocolTests(unittest.TestCase):
         session.proc = Mock()
         session.proc.poll.return_value = None
         proc = session.proc
-        with patch("echosign.attendance.write_json", side_effect=OSError("unavailable")), \
+        with patch("hdusign.attendance.write_json", side_effect=OSError("unavailable")), \
                 patch.object(AutoSigner, "_terminate_child") as terminate:
             session.close()
         terminate.assert_called_once_with(proc)
@@ -260,9 +260,9 @@ while not (p/'stop.json').exists():
             child_output = kwargs["stdout"]
             return original_popen(*args, **kwargs)
 
-        with patch("echosign.attendance.browser_command", side_effect=lambda *args: [
+        with patch("hdusign.attendance.browser_command", side_effect=lambda *args: [
                 sys.executable, "-X", "utf8", "-c", script, args[-1]]), \
-                patch("echosign.attendance.subprocess.Popen", side_effect=start_child):
+                patch("hdusign.attendance.subprocess.Popen", side_effect=start_child):
             try:
                 session.open()
                 process, folder = session.proc, session.directory

@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import yaml
 
-from echosign import gui as ui
+from hdusign import gui as ui
 
 
 class GuiTests(unittest.TestCase):
@@ -30,6 +30,7 @@ class GuiTests(unittest.TestCase):
         ui.SECRETS = cls.root / "secrets_local.json"
         cls.base_cfg = {
             "live_url": "https://example.com/class",
+            "live_audio": {"enabled": False},
             "location": {"lat": 29.2, "lng": 119.4},
             "auto_sign": {"enabled": False, "timeout_seconds": 180},
             "rules": {"strong": ["签到", "点名"], "semantic": {"enabled": True}},
@@ -56,6 +57,7 @@ class GuiTests(unittest.TestCase):
 
     def setUp(self):
         self.app._loading = True
+        self.app._needs_live_login = False
         self.app.cfg = copy.deepcopy(self.base_cfg)
         self.app.txt_rules.delete("1.0", "end")
         self.app._load_fields()
@@ -100,14 +102,14 @@ class GuiTests(unittest.TestCase):
                 self.app.v_lat.set(value)
                 self.assertFalse(self.app.save_cfg())
                 self.assertEqual(original, (ui.CONFIG.read_bytes(), ui.SECRETS.read_bytes()))
-                self.assertEqual(self.app._active_tab, "signin")
+                self.assertEqual(self.app._active_tab, "extras")
                 self.assertTrue(self.app._entries["lat"].invalid)
         self.app.v_lat.set("30")
         self.app.v_lng.set("181")
         self.assertFalse(self.app.save_cfg())
 
     def test_location_defaults_and_saved_values_reach_the_browser(self):
-        from echosign import browser
+        from hdusign import browser
 
         self.app.cfg.pop("location")
         self.app._load_fields()
@@ -151,7 +153,7 @@ class GuiTests(unittest.TestCase):
             with patch.object(self.app, "_worker", return_value=True) as worker:
                 self.app.do_live_login()
             self.assertEqual(worker.call_args.args[1], "https://course.hdu.edu.cn/#/home")
-            self.assertEqual(self.app.b_live_login.cget("text"), "登录直播")
+            self.assertEqual(self.app.b_live_login.cget("text"), "登录并读取课程")
             self.assertEqual(self.app.b_url.cget("text"), "打开 ↗")
 
     def test_background_audio_login_is_disabled_while_monitoring(self):
@@ -169,11 +171,119 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.app.b_live_login.cget("state"), "normal")
         self.assertEqual(self.app.b_live_account.cget("state"), "normal")
 
+    def test_home_login_passes_entered_credentials_and_loads_courses(self):
+        self.app.v_user.set(" demo-home ")
+        self.app.v_pwd.set("home-password")
+        self.app.v_url.set("")
+        with patch("hdusign.live.login_live", return_value=0) as login, \
+                patch.object(self.app, "refresh_live_courses") as refresh:
+            self.app.b_live_login.invoke()
+            self.assertEqual(self.app._entries["user"].cget("state"), "disabled")
+            self.assertEqual(self.app.b_monitor.cget("state"), "disabled")
+            self.pump_until(lambda: self.app._task_kind is None)
+        login.assert_called_once_with(
+            "https://course.hdu.edu.cn/#/home", self.app.stop_event,
+            credentials={"skl_username": "demo-home", "skl_password": "home-password"})
+        refresh.assert_called_once()
+        self.assertFalse(self.app._needs_live_login)
+
+    def test_home_login_requires_both_fields_before_saving_or_opening_browser(self):
+        for user, password, field in ((" ", "password", "user"), ("student", "", "pwd")):
+            self.app.v_user.set(user)
+            self.app.v_pwd.set(password)
+            with patch.object(self.app, "save_cfg") as save, patch.object(self.app, "_worker") as worker:
+                self.app.do_live_login()
+            save.assert_not_called()
+            worker.assert_not_called()
+            self.assertEqual(self.app._active_tab, "extras")
+            self.assertTrue(self.app._entries[field].invalid)
+
+    def test_failed_login_cannot_refresh_or_monitor_with_previous_session(self):
+        self.app.v_live.set(True)
+        with patch("hdusign.live.login_live", return_value=1):
+            self.app.do_live_login()
+            self.pump_until(lambda: self.app._task_kind is None)
+        self.assertTrue(self.app._needs_live_login)
+        self.assertFalse(self.app._live_course_lookup)
+        self.assertIn("登录未完成", self.app._live_course_hint.cget("text"))
+        with patch.object(self.app, "_worker") as worker:
+            self.app.refresh_live_courses()
+            self.assertFalse(self.app.start_monitor())
+        worker.assert_not_called()
+
+    def test_single_home_action_follows_selected_course_start_time(self):
+        from hdusign.live import LiveCourse
+        now = time.time()
+        current = LiveCourse("100", "当前课", now - 60, now + 1800)
+        future = LiveCourse("101", "稍后课", now + 3600, now + 5400)
+        self.app._set_live_course_choices([current, future])
+        labels = list(self.app._live_course_lookup)
+        self.app._select_live_course(labels[1])
+        self.assertEqual(self.app.b_monitor.cget("text"), "预约直播")
+        self.assertEqual(self.app.b_monitor.cget("state"), "normal")
+        with patch.object(self.app, "_schedule_monitor") as schedule, \
+                patch.object(self.app, "start_monitor") as start:
+            self.app.b_monitor.invoke()
+            schedule.assert_called_once_with(future)
+            start.assert_not_called()
+            self.app._select_live_course(labels[0])
+            self.assertEqual(self.app.b_monitor.cget("text"), "开始监控")
+            self.app.b_monitor.invoke()
+            start.assert_called_once()
+            schedule.assert_called_once()
+
+    def test_action_changes_at_start_time_without_reselecting_course(self):
+        from hdusign.live import LiveCourse
+        now = time.time()
+        course = LiveCourse("101", "即将开课", now + 60, now + 3600)
+        self.app._set_live_course_choices([course])
+        self.app._select_live_course(next(iter(self.app._live_course_lookup)))
+        self.assertEqual(self.app.b_monitor.cget("text"), "预约直播")
+        with patch.object(ui.time, "time", return_value=course.start), \
+                patch.object(self.app, "after", return_value=self.app._tick_job):
+            self.app._tick()
+        self.assertEqual(self.app.b_monitor.cget("text"), "开始监控")
+        self.assertEqual(self.app.b_monitor.cget("state"), "normal")
+
+    def test_activity_details_are_collapsed_and_keep_logs_when_toggled(self):
+        self.assertFalse(self.app._log_details.winfo_manager())
+        self.app._append_log("[i] hidden activity")
+        self.app.b_details.invoke()
+        self.assertEqual(self.app._log_details.winfo_manager(), "pack")
+        self.assertIn("hidden activity", self.app.log.get("1.0", "end"))
+        self.app.b_details.invoke()
+        self.assertFalse(self.app._log_details.winfo_manager())
+        self.assertIn("hidden activity", self.app.log.get("1.0", "end"))
+
+    def test_account_edit_clears_course_and_cancels_previous_reservation(self):
+        from hdusign.live import LiveCourse
+        course = LiveCourse("101", "稍后课", time.time() + 3600, time.time() + 5400)
+        self.app._set_live_course_choices([course])
+        self.app._select_live_course(next(iter(self.app._live_course_lookup)))
+        self.app._scheduled_course = course
+        self.app.v_user.set("different-student")
+        self.assertIsNone(self.app._scheduled_course)
+        self.assertFalse(self.app._live_course_lookup)
+        self.assertEqual(self.app.v_url.get(), "")
+        self.assertTrue(self.app._needs_live_login)
+        self.assertNotIn("scheduled_course", yaml.safe_load(ui.CONFIG.read_text(encoding="utf-8")))
+
+    def test_startup_does_not_restore_a_different_accounts_live_session(self):
+        session = self.root / "live_session.json"
+        session.write_text(json.dumps({"username": "another-student"}), encoding="utf-8")
+        try:
+            with patch.object(self.app, "refresh_live_courses") as refresh:
+                self.app._load_saved_live_courses()
+            refresh.assert_not_called()
+            self.assertTrue(self.app._needs_live_login)
+        finally:
+            session.unlink()
+
     def test_live_account_switch_requests_a_separate_manual_login(self):
         url = "https://course.hdu.edu.cn/#/play-center?courseId=123&target=live"
         self.app.v_live.set(True)
         self.app.v_url.set(url)
-        with patch("echosign.live.login_live", return_value=0) as login, \
+        with patch("hdusign.live.login_live", return_value=0) as login, \
                 patch.object(self.app, "refresh_live_courses") as refresh:
             self.app.b_live_account.invoke()
             self.pump_until(lambda: self.app._task_kind is None)
@@ -181,11 +291,11 @@ class GuiTests(unittest.TestCase):
         refresh.assert_called_once()
 
     def test_course_refresh_uses_unsaved_url_and_applies_selection_before_monitor(self):
-        from echosign.live import LiveCourse, live_course_url
+        from hdusign.live import LiveCourse, live_course_url
         course = LiveCourse("123", "网络安全", 1790038500, 1790041200, tecl_id="456")
         url = "https://course.hdu.edu.cn/#/home"
         self.app.v_url.set(url)
-        with patch("echosign.live.list_live_courses", return_value=[course]) as read:
+        with patch("hdusign.live.list_live_courses", return_value=[course]) as read:
             self.app.refresh_live_courses()
             self.pump_until(lambda: self.app._task_kind is None)
         self.assertEqual(read.call_args.args[0]["live_url"], url)
@@ -198,14 +308,14 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(cfg["live_audio"]["enabled"])
 
     def test_failed_refresh_clears_stale_courses_and_preserves_manual_url(self):
-        from echosign.live import LiveCourse, LiveLoginRequired
+        from hdusign.live import LiveCourse, LiveLoginRequired
         self.app._set_live_course_choices([LiveCourse("123", "课堂", 1, 2)])
         before = self.app.v_url.get()
-        with patch("echosign.live.list_live_courses", side_effect=LiveLoginRequired("请登录直播")):
+        with patch("hdusign.live.list_live_courses", side_effect=LiveLoginRequired("请登录直播")):
             self.app.refresh_live_courses()
             self.pump_until(lambda: self.app._task_kind is None)
         self.assertFalse(self.app._live_course_lookup)
-        self.assertEqual(self.app.live_course_picker.cget("state"), "disabled")
+        self.assertFalse(self.app._course_cards)
         self.assertEqual(self.app.v_url.get(), before)
         self.assertIn("请登录直播", self.app._live_course_hint.cget("text"))
 
@@ -347,7 +457,7 @@ class GuiTests(unittest.TestCase):
         self.app._append_log("[ASR 12:00:00] 现在开始签到")
         self.assertEqual(self.app._transcript.cget("text"), "现在开始签到")
         self.app._append_log("*** 签到提醒 [code] 12:00:00: 签到码: 2330")
-        self.assertEqual(self.app._metrics["code"].cget("text"), "2330")
+        self.assertEqual("".join(box.cget("text") for box in self.app._digit_boxes), "2330")
 
     def test_log_retention_and_follow_toggle(self):
         self.app.v_follow.set(False)
@@ -382,11 +492,92 @@ class GuiTests(unittest.TestCase):
 
     def test_clearing_activity_keeps_detected_code_and_timer(self):
         self.app._append_log("[i] 签到码: 1234")
+        self.assertEqual(len(self.app._activity_records), 1)
         self.app._metrics["time"].configure(text="00:12:34")
         self.app.clear_log()
-        self.assertEqual(self.app._metrics["code"].cget("text"), "1234")
+        self.assertEqual("".join(box.cget("text") for box in self.app._digit_boxes), "1234")
         self.assertEqual(self.app.b_copy.cget("state"), "normal")
         self.assertEqual(self.app._metrics["time"].cget("text"), "00:12:34")
+        self.assertEqual(self.app._activity_records, [])
+
+    def test_activity_toggle_keeps_recent_events_and_ignores_transcripts(self):
+        self.app._set_log_details(False)
+        self.app._append_log("[ASR 12:00:00] 现在开始签到")
+        self.assertEqual(self.app._activity_records, [])
+        for i in range(25):
+            self.app._append_log(f"[i] 签到码: {1000 + i}")
+        self.assertEqual(len(self.app._activity_records), 20)
+        self.assertIn("1005", self.app._activity_records[0]["text"])
+        self.assertIn("1024", self.app._activity_records[-1]["text"])
+        self.assertFalse(self.app._log_details.winfo_manager())
+        self.app.b_details.invoke()
+        self.assertEqual(self.app._log_details.winfo_manager(), "pack")
+        self.app.b_details.invoke()
+        self.assertFalse(self.app._log_details.winfo_manager())
+        self.assertEqual(len(self.app._activity_records), 20)
+
+    def test_page_actions_restore_sidebar_and_open_activity(self):
+        if not self.app._sidebar_collapsed:
+            self.app.b_focus.invoke()
+        self.assertTrue(self.app._sidebar_collapsed)
+        self.app._open_settings()
+        self.assertFalse(self.app._sidebar_collapsed)
+        self.assertEqual(self.app._active_tab, "extras")
+        self.app.b_activity.invoke()
+        self.assertEqual(self.app._log_details.winfo_manager(), "pack")
+        self.app._set_log_details(False)
+        self.app._select_tab("basic")
+
+    def test_hidden_activity_defers_cards_and_open_updates_reuse_widgets(self):
+        self.app._set_log_details(True)
+        self.app.clear_log()
+        self.app._set_log_details(False)
+        for i in range(20):
+            self.app._append_log(f"[i] 签到码: {2000 + i}")
+        self.assertEqual(self.app._activity_cards, {})
+        self.app._set_log_details(True)
+        original = dict(self.app._activity_cards)
+        self.assertEqual(len(original), 20)
+        self.app._append_log("[i] 签到码: 9999")
+        surviving = set(original) & set(self.app._activity_cards)
+        self.assertEqual(len(surviving), 19)
+        for key in surviving:
+            self.assertIs(original[key], self.app._activity_cards[key])
+        self.assertEqual(len(self.app._activity_cards), 20)
+        self.app._set_log_details(False)
+
+    def test_quote_color_updates_preserve_text_and_skip_layout(self):
+        quote = self.app._transcript
+        quote.configure(text="保留可复制的转写内容")
+        self.app.update_idletasks()
+        quote._textbox.tag_add("sel", "1.0", "1.2")
+        with patch.object(quote, "_schedule_fit") as fit:
+            quote.configure(text="保留可复制的转写内容", text_color=ui.design.TXT2)
+            fit.assert_not_called()
+        self.assertTrue(quote._textbox.tag_ranges("sel"))
+        self.assertFalse(quote._textbox.cget("yscrollcommand"))
+        self.assertFalse(quote._textbox.cget("xscrollcommand"))
+
+    def test_scrollbar_drawing_does_not_reenter_layout(self):
+        bar = self.app._page_scroll._scrollbar
+        with patch.object(bar._canvas, "update_idletasks") as flush:
+            bar.set(0.1, 0.8)
+            bar.configure(button_color=ui.design.TXT3)
+            flush.assert_not_called()
+        with patch.object(bar, "_draw") as draw:
+            bar.set(0.1, 0.8)
+            draw.assert_not_called()
+        bar.configure(button_color=ui.design.BG)
+
+    def test_repeated_code_preserves_digit_widgets_and_copy_feedback(self):
+        self.app._set_code("1234")
+        with patch.object(self.app.b_copy, "configure") as copy, \
+                patch.object(self.app._digit_boxes[0], "configure") as first:
+            self.app._set_code("1234")
+            copy.assert_not_called()
+            first.assert_not_called()
+            self.app._set_code("1235")
+            first.assert_not_called()
 
     def test_new_monitor_clears_the_previous_code_before_initialization(self):
         self.app._append_log("[i] 签到码: 1234")
@@ -424,6 +615,9 @@ class GuiTests(unittest.TestCase):
         self.pump_until(lambda: self.app._status.cget("text") == "监控中")
         self.assertEqual(self.app._status.cget("text"), "监控中")
         self.assertEqual(self.app.b_monitor.cget("text"), "停止监控")
+        self.assertEqual(self.app.b_monitor.cget("fg_color"), "transparent")
+        self.assertEqual(self.app.b_monitor.cget("text_color"), ui.design.RED)
+        self.assertEqual(self.app._status_chip.cget("fg_color"), ui.design.GREEN_SOFT)
         self.app.b_monitor.invoke()
         self.assertTrue(self.app.stop_event.is_set())
         self.assertEqual(self.app.b_monitor.cget("state"), "disabled")
@@ -431,7 +625,9 @@ class GuiTests(unittest.TestCase):
         self.pump_until(lambda: self.app._task_kind is None)
         self.assertEqual(self.app._status.cget("text"), "已停止")
         self.assertEqual(self.app.b_monitor.cget("state"), "normal")
-        self.assertEqual(self.app.b_monitor.cget("text"), "启动监控")
+        self.assertEqual(self.app.b_monitor.cget("text"), "开始监控")
+        self.assertEqual(self.app.b_monitor.cget("fg_color"), ui.design.PRIMARY)
+        self.assertEqual(self.app.b_monitor.cget("border_width"), 0)
 
     def test_worker_failure_is_visible_and_recovers_controls(self):
         def failing_task():

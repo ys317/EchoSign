@@ -11,7 +11,7 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-from echosign.attendance import AutoSigner
+from hdusign.attendance import AutoSigner
 
 
 class SchedulerTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class SchedulerTests(unittest.TestCase):
                 target()
             return thread_type(target=delayed, **kwargs)
 
-        with patch("echosign.attendance.threading.Thread", side_effect=delayed_thread) as factory, \
+        with patch("hdusign.attendance.threading.Thread", side_effect=delayed_thread) as factory, \
                 patch.object(signer, "_sign_one") as sign:
             self.assertTrue(signer.submit("1234"))
             self.assertTrue(signer.submit("5678"))
@@ -106,7 +106,7 @@ class SchedulerTests(unittest.TestCase):
             finally:
                 signer.close()
         leftovers = [thread for thread in set(threading.enumerate()) - before
-                     if thread.name == "EchoSign attendance"]
+                     if thread.name == "HDUSign attendance"]
         self.assertEqual(leftovers, [])
 
     def test_task_exception_does_not_strand_later_work(self):
@@ -146,7 +146,7 @@ class ChildCancellationTests(unittest.TestCase):
         signer = AutoSigner(lambda *args: notifications.append(args), stop=stop)
         self.addCleanup(signer.close)
         self.addCleanup(stop.set)
-        with patch("echosign.attendance.subprocess.Popen", return_value=child) as launch, \
+        with patch("hdusign.attendance.subprocess.Popen", return_value=child) as launch, \
                 patch.object(signer, "_terminate_child", side_effect=lambda process: process.kill()) as terminate, \
                 redirect_stdout(StringIO()):
             signer.submit("1234")
@@ -163,7 +163,7 @@ class ChildCancellationTests(unittest.TestCase):
         child = self.child(threading.Event())
         notifications = []
         signer = AutoSigner(lambda *args: notifications.append(args), timeout_s=0.01)
-        with patch("echosign.attendance.subprocess.Popen", return_value=child) as launch, \
+        with patch("hdusign.attendance.subprocess.Popen", return_value=child) as launch, \
                 patch.object(signer, "_terminate_child", side_effect=lambda process: process.kill()) as terminate, \
                 redirect_stdout(StringIO()):
             signer._sign_one("1234")
@@ -176,7 +176,7 @@ class ChildCancellationTests(unittest.TestCase):
         stop = threading.Event()
         stop.set()
         signer = AutoSigner(lambda *_: None, stop=stop)
-        with patch("echosign.attendance.subprocess.Popen") as launch:
+        with patch("hdusign.attendance.subprocess.Popen") as launch:
             self.assertFalse(signer.submit("1234"))
             signer._sign_one("1234")
             signer.close()

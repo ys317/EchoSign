@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import yaml
 
-from echosign import gui
-from echosign.live import LiveCourse
+from hdusign import gui
+from hdusign.live import LiveCourse
 
 
 ZONE = dt.timezone(dt.timedelta(hours=8))
@@ -50,11 +50,17 @@ class ScheduledMonitorTests(unittest.TestCase):
         self.app._task_kind = None
         self.app._closing = False
         self.app._loading = False
+        self.app._needs_live_login = False
         self.app._live_courses = []
         self.app._live_course_lookup = {}
         self.app.b_monitor = _Widget()
         self.app._dot = _Widget()
         self.app._status = _Widget()
+        self.app._status_chip = _Widget()
+        self.app._timer_label = _Widget()
+        self.app._pill = _Widget()
+        self.app._hero = _Widget()
+        self.app._course_cards = {}
         self.app._live_course_hint = _Widget()
         self.app._transcript = _Widget()
         self.app._transcript_hint = _Widget()
@@ -72,13 +78,14 @@ class ScheduledMonitorTests(unittest.TestCase):
         course = future_course()
         self.assertEqual(gui.App._course_label(course, now=NOW), "明日 08:55 · 网络安全 · 王老师")
 
-    def test_future_selection_changes_the_main_action_to_schedule(self):
+    def test_future_selection_changes_the_single_action_to_schedule(self):
         course = future_course()
         self.app._live_course_lookup = {"网络安全": course}
         self.app.v_live_course.set("网络安全")
         with patch.object(gui.time, "time", return_value=NOW):
             self.app._update_monitor_button()
-        self.assertEqual(self.app.b_monitor.calls[-1]["text"], "预约监控")
+        self.assertEqual(self.app.b_monitor.calls[-1]["text"], "预约直播")
+        self.assertEqual(self.app.b_monitor.calls[-1]["state"], "normal")
 
     def test_scheduling_stores_the_course_and_shows_a_cancellable_state(self):
         course = future_course()
@@ -98,7 +105,7 @@ class ScheduledMonitorTests(unittest.TestCase):
             self.assertTrue(self.app._cancel_scheduled_course())
         self.assertIsNone(self.app._scheduled_course)
         write.assert_called_once_with(None)
-        self.assertEqual(self.app.b_monitor.calls[-1]["text"], "启动监控")
+        self.assertEqual(self.app.b_monitor.calls[-1]["text"], "开始监控")
         self.assertIn("已取消", self.app._live_course_hint.calls[-1]["text"])
 
     def test_due_course_uses_the_normal_monitor_start_path(self):
@@ -142,7 +149,8 @@ class ScheduledMonitorTests(unittest.TestCase):
     def test_restore_reselects_the_saved_course_and_direct_audio(self):
         course = future_course()
         self.app.cfg = {"scheduled_course": gui.App._scheduled_course_data(course)}
-        with patch.object(self.app, "_show_scheduled_state") as show, \
+        with patch.object(gui.time, "time", return_value=NOW), \
+                patch.object(self.app, "_show_scheduled_state") as show, \
                 patch.object(self.app, "_update_audio_mode") as audio_mode, \
                 patch.object(self.app, "_write_scheduled_course") as write:
             self.app._restore_scheduled_course()

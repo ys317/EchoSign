@@ -17,12 +17,12 @@ import unittest
 
 import numpy as np
 
-from echosign import browser
-from echosign import monitor
-from echosign.__main__ import main as app_main
-from echosign.attendance import AutoSigner
-from echosign.audio import LoopbackSource
-from echosign.attendance import SignResult, classify_response
+from hdusign import browser
+from hdusign import monitor
+from hdusign.__main__ import main as app_main
+from hdusign.attendance import AutoSigner
+from hdusign.audio import LoopbackSource
+from hdusign.attendance import SignResult, classify_response
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -115,7 +115,7 @@ class SignResultTests(unittest.TestCase):
 
     def test_frozen_entrypoint_preserves_result_file_argument(self):
         captured = []
-        args = ["EchoSign.exe", "--sign", "1234", "--result-file", "result.json"]
+        args = ["HDUSign.exe", "--sign", "1234", "--result-file", "result.json"]
 
         def fake_main(argv):
             captured.extend(argv)
@@ -194,7 +194,7 @@ class DispatcherTests(unittest.TestCase):
                 if frozen:
                     self.assertEqual(command[:2], [sys.executable, "--sign"])
                 else:
-                    self.assertEqual(command[:5], [sys.executable, "-X", "utf8", "-m", "echosign"])
+                    self.assertEqual(command[:5], [sys.executable, "-X", "utf8", "-m", "hdusign"])
 
     def test_abnormal_exit_never_reports_success(self):
         notification, _ = self.dispatch(SignResult("success", "1234", "OK"), returncode=1)

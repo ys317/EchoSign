@@ -9,10 +9,10 @@ from unittest.mock import Mock
 import numpy as np
 import yaml
 
-from echosign.alert import Alerter
-from echosign.monitor import AudioClock, make_watcher, run_pipeline
-from echosign.rules import RuleMatcher
-from echosign.rules import SignInWatcher, extract_codes
+from hdusign.alert import Alerter
+from hdusign.monitor import AudioClock, make_watcher, run_pipeline
+from hdusign.rules import RuleMatcher
+from hdusign.rules import SignInWatcher, extract_codes
 
 
 class CodeExtractionTests(unittest.TestCase):

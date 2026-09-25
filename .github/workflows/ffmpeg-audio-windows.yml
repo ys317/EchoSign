@@ -42,7 +42,7 @@ jobs:
       - name: Keep matched release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ffmpeg-8.1.2-echosign-audio-win64
+          name: ffmpeg-8.1.2-hdusign-audio-win64
           path: tools/ffmpeg-build/dist/*
           if-no-files-found: error
           retention-days: 30

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -12,14 +13,23 @@ from urllib.parse import parse_qs, urlparse
 import yaml
 from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
-from echosign.attendance import SignResult, classify_response, write_json
-from echosign.location import DEFAULT_LAT, DEFAULT_LNG
-from echosign.processes import hidden_subprocess_options
-from echosign.runtime import application_root, configure_browser_runtime
+from hdusign.attendance import SignResult, classify_response, write_json
+from hdusign.location import DEFAULT_LAT, DEFAULT_LNG
+from hdusign.processes import hidden_subprocess_options
+from hdusign.runtime import application_root, configure_browser_runtime
 
 ROOT = application_root()
 PROFILE = ROOT / "browser_profile"
 START = "https://skl.hdu.edu.cn/index.html"
+
+
+def account_profile(secrets: dict) -> Path:
+    """Keep attendance sessions tied to the account entered on the home page."""
+    username = str(secrets.get("skl_username", "")).strip()
+    if not username:
+        return PROFILE
+    identity = hashlib.sha256(username.encode("utf-8")).hexdigest()
+    return PROFILE / "accounts" / identity
 
 
 def load_secrets() -> dict:
@@ -145,23 +155,45 @@ def _cleanup_stale_profile() -> None:
             pass
 
 
-def login() -> int:
+def login(stop=None) -> int:
+    if stop is not None and stop.is_set():
+        return 0
     configure_browser_runtime()
     secrets = load_secrets()
     _cleanup_stale_profile()
     with sync_playwright() as pw:
-        ctx = pw.chromium.launch_persistent_context(str(PROFILE), headless=False, args=_browser_args())
+        ctx = pw.chromium.launch_persistent_context(str(account_profile(secrets)), headless=False, args=_browser_args())
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
+
+        def wait(milliseconds):
+            # Keep Playwright dispatching events while allowing window close to
+            # cancel manual login instead of waiting for its three-minute limit.
+            remaining = milliseconds
+            while remaining > 0:
+                if stop is not None and stop.is_set():
+                    return False
+                step = min(100, remaining)
+                page.wait_for_timeout(step)
+                remaining -= step
+            return stop is None or not stop.is_set()
+
         page.goto(START, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(3000)
+        if not wait(3000):
+            ctx.close()
+            return 0
 
         deadline = time.time() + 180
         login_attempted = False
         while time.time() < deadline:
+            if stop is not None and stop.is_set():
+                ctx.close()
+                return 0
             url = page.url
             if "sso.hdu.edu.cn" in url or "cas.hdu.edu.cn" in url:
                 if not login_attempted:
-                    page.wait_for_timeout(1500)
+                    if not wait(1500):
+                        ctx.close()
+                        return 0
                     login_attempted = try_sso_login(page, secrets)
             elif "skl.hdu.edu.cn" in url:
                 token = page.evaluate("() => window.localStorage.getItem('sessionId') || ''")
@@ -177,7 +209,9 @@ def login() -> int:
             else:
                 print(f"[i] 当前页面: {url[:90]}")
             print("    (180秒内自动检测, 也可手动在浏览器里完成任何操作)")
-            page.wait_for_timeout(5000)
+            if not wait(5000):
+                ctx.close()
+                return 0
 
         print("[!] 超时未确认登录态; profile 已保留, 可重跑")
         ctx.close()
@@ -304,7 +338,7 @@ def sign(argv=None) -> int:
         configure_browser_runtime()
         secrets = load_secrets()
         with sync_playwright() as pw:
-            ctx = pw.chromium.launch_persistent_context(str(PROFILE),
+            ctx = pw.chromium.launch_persistent_context(str(account_profile(secrets)),
                                                         headless=False, args=_browser_args())
             try:
                 lat, lng = _location()
@@ -373,7 +407,7 @@ def sign_worker(argv=None) -> int:
         configure_browser_runtime()
         secrets = load_secrets()
         with sync_playwright() as pw:
-            ctx = pw.chromium.launch_persistent_context(str(PROFILE), headless=False, args=_browser_args())
+            ctx = pw.chromium.launch_persistent_context(str(account_profile(secrets)), headless=False, args=_browser_args())
             try:
                 lat, lng = _location()
                 ctx.grant_permissions(["geolocation"], origin="https://skl.hdu.edu.cn")

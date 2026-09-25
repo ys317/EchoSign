@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from echosign.processes import hidden_subprocess_options
+from hdusign.processes import hidden_subprocess_options
 
 
 DEFAULT_LAT = 30.314732

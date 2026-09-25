@@ -31,7 +31,7 @@ def configure_browser_runtime() -> None:
     if getattr(sys, "frozen", False):
         browsers = resource_root() / "browsers"
         if not browsers.is_dir():
-            raise RuntimeError("浏览器组件缺失，请重新完整解压 EchoSign 发行包。")
+            raise RuntimeError("浏览器组件缺失，请重新完整解压 HDUSign 发行包。")
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
 
 
@@ -42,7 +42,7 @@ def semantic_model_options(model: str) -> dict:
     if all((directory / name).is_file() for name in SEMANTIC_FILES):
         return {"specific_model_path": str(directory), "local_files_only": True}
     if getattr(sys, "frozen", False):
-        raise RuntimeError("语义模型不完整，请重新完整解压 EchoSign 发行包。")
+        raise RuntimeError("语义模型不完整，请重新完整解压 HDUSign 发行包。")
     return {}
 
 
@@ -53,10 +53,10 @@ def check_ffmpeg_runtime(executable: str | Path | None = None) -> dict:
 
     import numpy as np
 
-    from echosign.processes import hidden_subprocess_options
+    from hdusign.processes import hidden_subprocess_options
 
     if executable is None:
-        from echosign.media import find_ffmpeg
+        from hdusign.media import find_ffmpeg
         executable = find_ffmpeg()
     executable = Path(executable).resolve()
 
@@ -120,19 +120,22 @@ def check_runtime(report_path: str) -> int:
     import tempfile
     import traceback
 
-    from echosign import __version__
+    from hdusign import __version__
 
     report = {"version": __version__, "ok": False}
     try:
         import numpy as np
         from fastembed import TextEmbedding
         from playwright.sync_api import sync_playwright
-        from echosign.audio import StreamingASR
+        from hdusign.audio import StreamingASR
+        from hdusign.qt_app import check_desktop_runtime
+
+        report["desktop"] = check_desktop_runtime()
 
         configure_browser_runtime()
         ffmpeg = check_ffmpeg_runtime()
         report.update(ffmpeg=True, ffmpeg_version=ffmpeg["version"], ffmpeg_audio=ffmpeg)
-        with tempfile.TemporaryDirectory(prefix="echosign-check-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="hdusign-check-") as temporary:
             # Keep inference independent of an existing Hugging Face/model cache.
             embedding = TextEmbedding(model_name=SEMANTIC_MODEL,
                                       cache_dir=str(Path(temporary) / "models"),
@@ -152,8 +155,8 @@ def check_runtime(report_path: str) -> int:
                 try:
                     context.route("**/*", lambda route: route.abort())
                     page = context.pages[0] if context.pages else context.new_page()
-                    page.set_content("<title>EchoSign</title><p>课堂辅助</p>")
-                    if page.title() != "EchoSign":
+                    page.set_content("<title>HDUSign</title><p>课堂辅助</p>")
+                    if page.title() != "HDUSign":
                         raise RuntimeError("浏览器启动检查失败")
                     cdp = context.new_cdp_session(page)
                     report["browser_version"] = cdp.send("Browser.getVersion")["product"]

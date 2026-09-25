@@ -23,7 +23,7 @@ grep -F "[GNUPG:] VALIDSIG $signer " "$record/source-signature.txt" >/dev/null
 tar --extract --file "ffmpeg-$version.tar.xz" --directory "$build_root" --no-same-owner
 
 # No external codec/TLS/compression libraries are enabled or auto-detected.
-# AAC encoding is included for EchoSign's existing offline runtime check.
+# AAC encoding is included for HDUSign's existing offline runtime check.
 configure=(
     --target-os=mingw32 --arch=x86_64 --cc=gcc --cxx=g++
     --disable-autodetect --disable-everything --disable-programs --enable-ffmpeg
@@ -43,7 +43,7 @@ configure=(
     --enable-parser=aac,aac_latm,ac3,flac,mpegaudio,opus,vorbis
     --enable-filter=aformat,aresample,anull
     --extra-ldflags='-static -static-libgcc'
-    --extra-version=echosign-audio
+    --extra-version=hdusign-audio
 )
 printf '%s\n' "${configure[@]}" > "$record/configure-args.txt"
 pacman -Q > "$record/msys2-packages.txt"

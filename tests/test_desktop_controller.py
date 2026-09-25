@@ -1,0 +1,241 @@
+"""Qt presentation contracts. All services and account files are isolated."""
+import copy
+import json
+from pathlib import Path
+import tempfile
+import threading
+import time
+import unittest
+from unittest.mock import patch
+
+import yaml
+from PySide6.QtCore import QCoreApplication
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtTest import QSignalSpy
+
+from hdusign.desktop_controller import Controller, Rows
+from hdusign.demo import DemoServices, demo_courses, prepare_demo
+from hdusign.live import live_course_url
+from hdusign.location import Location
+
+
+APP = QGuiApplication.instance() or QGuiApplication([])
+APP.setQuitOnLastWindowClosed(False)
+
+
+class DesktopControllerTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        prepare_demo(self.root)
+        self.c = Controller(self.root, DemoServices(), auto_load=False)
+        self.c.shutdown()  # tests advance queues and clocks explicitly
+
+    def tearDown(self):
+        self.c.shutdown()
+        if self.c.worker:
+            self.c.worker.join(2)
+            self.assertFalse(self.c.worker.is_alive())
+        self.tmp.cleanup()
+
+    def complete(self):
+        deadline = time.monotonic() + 2
+        while self.c._task and time.monotonic() < deadline:
+            if self.c.worker:
+                self.c.worker.join(.01)
+            self.c.drain()
+        self.assertFalse(self.c._task)
+
+    def select(self, future=False):
+        courses = demo_courses()
+        self.c.set_courses(courses)
+        self.c.selectCourse(live_course_url(courses[int(future)]))
+        return courses[int(future)]
+
+    def test_save_preserves_hidden_settings_and_secret_keys(self):
+        self.c.cfg['unexposed'] = {'nested': [1, 2]}
+        self.c.secrets['retained'] = 'fixture'
+        self.c.setField('rules', ' 签到\n\n请签到 ')
+        self.c.setField('password', ' spaces stay ')
+        self.assertTrue(self.c.save())
+        cfg = yaml.safe_load(self.c.config_path.read_text(encoding='utf-8'))
+        secrets = json.loads(self.c.secrets_path.read_text())
+        self.assertEqual(cfg['unexposed'], {'nested': [1, 2]})
+        self.assertEqual(cfg['rules']['strong'], ['签到', '请签到'])
+        self.assertEqual(secrets['retained'], 'fixture')
+        self.assertEqual(secrets['skl_password'], ' spaces stay ')
+        self.assertNotIn('password', str(cfg))
+
+    def test_invalid_coordinates_never_write(self):
+        original = self.c.config_path.read_bytes()
+        for value in ('NaN', 'inf', '-91', 'abc'):
+            self.c.setField('latitude', value)
+            self.assertFalse(self.c.save())
+            self.assertEqual(self.c._state['errorField'], 'latitude')
+            self.assertEqual(self.c.config_path.read_bytes(), original)
+
+    def test_theme_persists_without_saving_unsaved_fields(self):
+        self.c.setField('webhook', 'https://example.invalid/unsaved')
+        self.c.toggleTheme()
+        cfg = yaml.safe_load(self.c.config_path.read_text(encoding='utf-8'))
+        self.assertEqual(cfg['ui']['appearance'], 'light')
+        self.assertEqual(cfg['alert']['webhook']['url'], '')
+        self.assertTrue(self.c._state['dirty'])
+        self.assertEqual(self.c.form.value('webhook'), 'https://example.invalid/unsaved')
+
+    def test_save_failure_is_visible_and_keeps_dirty_form(self):
+        self.c.setField('rules', 'updated')
+        with patch('hdusign.desktop_controller.write_text_atomic', side_effect=PermissionError()):
+            self.assertFalse(self.c.save())
+        self.assertTrue(self.c._state['dirty'])
+        self.assertTrue(self.c._state['feedbackError'])
+
+    def test_account_change_invalidates_course_and_blocks_monitor(self):
+        self.select()
+        self.c.setField('username', 'changed')
+        self.assertEqual(self.c.course_model.count, 0)
+        self.assertEqual(self.c._form['url'], '')
+        self.assertTrue(self.c._state['needsLogin'])
+        self.assertFalse(self.c.start_monitor())
+
+    def test_login_passes_credentials_snapshot_then_loads_courses(self):
+        captured = []
+        def login(url, stop, credentials, manual):
+            captured.append(copy.deepcopy(credentials))
+            return 0
+        self.c.services.login = login
+        self.c.login(False)
+        self.complete()
+        self.assertEqual(captured[0]['skl_username'], '2026001001')
+        self.assertEqual(self.c.course_model.count, 2)
+        self.assertFalse(self.c._state['needsLogin'])
+
+    def test_failed_login_does_not_reuse_previous_selection(self):
+        self.select()
+        self.c.services.login = lambda *a: 1
+        self.c.login(False)
+        self.complete()
+        self.assertTrue(self.c._state['needsLogin'])
+        self.assertEqual(self.c.course_model.count, 0)
+        self.assertEqual(self.c._form['url'], '')
+
+    def test_blank_login_focuses_missing_field(self):
+        self.c.setField('password', '')
+        spy = QSignalSpy(self.c.navigateSettings)
+        self.c.login(False)
+        self.assertFalse(self.c._task)
+        self.assertEqual(spy.at(0), ['password'])
+
+    def test_schedule_survives_restart_and_cancels_on_account_edit(self):
+        course = self.select(future=True)
+        self.c.toggleMonitor()
+        self.assertEqual(self.c._state['actionText'], '取消预约')
+        other = Controller(self.root, DemoServices(), auto_load=False)
+        other.shutdown()
+        self.assertEqual(other._scheduled, course)
+        self.assertEqual(other.form.value('url'), live_course_url(course))
+        self.c.setField('username', 'changed')
+        self.assertIsNone(self.c._scheduled)
+        self.assertNotIn('scheduled_course', yaml.safe_load(self.c.config_path.read_text(encoding='utf-8')))
+
+    def test_due_schedule_starts_once_and_clears_persistence(self):
+        course = self.select(future=True)
+        self.c.toggleMonitor()
+        calls = []
+        self.c.services.monitor = lambda cfg, stop: (calls.append(cfg), stop.wait(), 0)[-1]
+        with patch('hdusign.desktop_controller.time.time', return_value=course.start + 3):
+            self.c.tick()
+            self.c.tick()
+        self.c.stop()
+        self.complete()
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn('scheduled_course', self.c.cfg)
+
+    def test_expired_schedule_never_starts(self):
+        course = self.select(future=True)
+        self.c.toggleMonitor()
+        with patch('hdusign.desktop_controller.time.time', return_value=course.end + 1):
+            self.c.tick()
+        self.assertIsNone(self.c._scheduled)
+        self.assertFalse(self.c._task)
+
+    def test_cancel_failure_preserves_scheduled_account(self):
+        self.select(future=True)
+        self.c.toggleMonitor()
+        with patch('hdusign.desktop_controller.write_text_atomic', side_effect=PermissionError()):
+            self.c.setField('username', 'changed')
+        self.assertIsNotNone(self.c._scheduled)
+        self.assertEqual(self.c._form['username'], '2026001001')
+
+    def test_partial_burst_is_coalesced_and_final_code_keeps_zero(self):
+        spy = QSignalSpy(self.c.changed)
+        self.c.consume([f'…识别中: 字 {i}' for i in range(160)] + [
+            '[ASR 10:00:00] 签到码是零二三四。', '[i] 签到码: 0234'])
+        self.assertEqual(spy.count(), 1)
+        self.assertEqual(self.c._state['transcript'], '签到码是零二三四。')
+        self.assertTrue(self.c._state['transcriptFinal'])
+        self.assertEqual(self.c.log_model.count, 2)
+        self.c.copyCode()
+        self.assertEqual(APP.clipboard().text(), '0234')
+        self.assertEqual(self.c.state.value('code'), '0234')
+
+    def test_reconnect_clears_partial_but_preserves_confirmed_code(self):
+        self.c._task = 'monitor'
+        self.c.stop_event.clear()
+        self.c.consume(['[i] 签到码: 0123', '…识别中: unfinished', '[i] 直播状态: 正在重连'])
+        self.assertEqual(self.c._state['code'], '0123')
+        self.assertEqual(self.c._state['status'], '正在重连')
+        self.c.consume(['[i] ASR 就绪'])
+        self.assertEqual(self.c._state['status'], '监控中')
+        self.assertEqual(self.c._state['transcript'], '等待课堂声音…')
+        self.c._task = ''
+
+    def test_models_are_bounded_and_append_incrementally(self):
+        model = Rows(3)
+        reset = QSignalSpy(model.modelReset)
+        inserted = QSignalSpy(model.rowsInserted)
+        model.append([{'n': i} for i in range(3)])
+        model.append([{'n': 3}, {'n': 4}])
+        self.assertEqual([r['n'] for r in model.items], [2, 3, 4])
+        self.assertEqual(reset.count(), 0)
+        self.assertEqual(inserted.count(), 2)
+
+    def test_close_waits_for_worker_and_drains_tail_logs(self):
+        self.select()
+        self.assertTrue(self.c.start_monitor())
+        ready = QSignalSpy(self.c.closeReady)
+        self.assertFalse(self.c.requestClose())
+        self.complete()
+        self.assertEqual(ready.count(), 1)
+        self.assertEqual(self.c._state['code'], '2330')
+        self.assertTrue(self.c.requestClose())
+
+    def test_large_log_tail_delays_completion_without_losing_code(self):
+        self.c._task = 'monitor'
+        for i in range(400):
+            self.c.log_queue.put(f'[i] diagnostic {i}')
+        self.c.log_queue.put('[i] 签到码: 0042')
+        self.c.result_queue.put(('monitor', False, 0))
+        self.c.drain()
+        self.assertEqual(self.c._task, 'monitor')
+        self.c.drain()
+        self.c.drain()
+        self.assertFalse(self.c._task)
+        self.assertEqual(self.c._state['code'], '0042')
+
+    def test_location_does_not_overwrite_edits_made_during_request(self):
+        self.c._location_request = (self.c._form['latitude'], self.c._form['longitude'])
+        self.c.setField('latitude', '20.1')
+        self.c._finish('locate', False, Location(30.1, 120.2, 5))
+        self.assertEqual(self.c._form['latitude'], '20.1')
+        self.assertIn('保留', self.c._state['locationHint'])
+
+    def test_course_limit_remains_safe_during_tick(self):
+        self.c.course_model.limit = 2
+        self.c.set_courses(demo_courses() * 10)
+        self.c.tick()
+        self.assertEqual(len(self.c._courses), 2)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -16,8 +16,8 @@ import wave
 
 import numpy as np
 
-from echosign import media
-from echosign.processes import hidden_subprocess_options
+from hdusign import media
+from hdusign.processes import hidden_subprocess_options
 
 
 class FakePipe:
@@ -118,8 +118,8 @@ class MediaTests(unittest.TestCase):
         self.assertTrue(process.stdout.closed)
         self.assertTrue(process.stderr.closed)
         self.assertFalse(any(thread.is_alive() and thread.name in
-                             {"EchoSign live audio", "EchoSign media errors",
-                              "EchoSign media supervisor"}
+                             {"HDUSign live audio", "HDUSign media errors",
+                              "HDUSign media supervisor"}
                              for thread in threading.enumerate()))
 
     def test_error_categories_have_a_read_only_recovery_contract(self):
@@ -568,7 +568,7 @@ class LocalFFmpegTests(unittest.TestCase):
             worker.start()
             try:
                 url = f"http://127.0.0.1:{server.server_port}/synthetic.flv"
-                chunks = list(media.FFmpegAudioSource(url, headers={"User-Agent": "EchoSign offline test"},
+                chunks = list(media.FFmpegAudioSource(url, headers={"User-Agent": "HDUSign offline test"},
                                                       executable=executable).chunks())
                 decoded = np.concatenate(chunks)
                 self.assertGreater(len(decoded), 4000)

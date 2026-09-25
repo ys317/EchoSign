@@ -53,7 +53,7 @@ class SemanticMatcher:
         self.templates = list(templates)
         from fastembed import TextEmbedding  # lazy; only when enabled
 
-        from echosign.runtime import semantic_model_options
+        from hdusign.runtime import semantic_model_options
 
         self._model = TextEmbedding(model_name=model, **semantic_model_options(model))
 

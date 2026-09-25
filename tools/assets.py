@@ -11,138 +11,62 @@ import tempfile
 import time
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageGrab
+from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from echosign import gui as ui  # noqa: E402
-
-
-class DemoApp(ui.App):
-    def __init__(self):
-        super().__init__()
-        self.refresh_live_courses()
-
-    def _load_saved_live_courses(self):
-        self._courses_job = None
-
-    def refresh_live_courses(self):
-        from echosign.live import LiveCourse
-        self._set_live_course_choices([
-            LiveCourse("123", "计算机网络", 1790038500, 1790041200,
-                       teacher="王老师", classroom="教学楼 201", section="第2节", tecl_id="456"),
-            LiveCourse("124", "数据库原理", 1790038500, 1790041200, teacher="李老师"),
-        ])
-        self._select_live_course(next(iter(self._live_course_lookup)))
-
-    def start_monitor(self):
-        if self._busy() or not self.save_cfg():
-            return
-        self.stop_event.clear()
-        self._active_audio_source = "live" if self.v_live.get() else "system"
-        self._worker(lambda: self.stop_event.wait(), kind="monitor")
-        for line in (
-            "[i] ASR 就绪 · 正在接收直播音频" if self.v_live.get() else "[i] ASR 就绪 · 等待课堂声音",
-            "[ASR 10:00:01] 同学们，今天继续学习上一节的内容。",
-            "[ASR 10:00:04] 现在开始签到，签到码是二三三零。",
-            "[i] 签到提醒：检测到签到码: 2330",
-        ):
-            self.logline(line)
-        self.logline("[i] 自动签到已关闭，请在课堂页面自行确认。")
-
-    def do_login(self):
-        self.logline("[i] 演示模式：未连接登录服务。")
-
-    def do_live_login(self, switch_account=False):
-        self.logline("[i] 演示模式：未连接直播登录服务。")
-
-    def test_webhook(self):
-        self.logline("[i] 演示模式：未发送通知。")
-
-    def open_url(self):
-        self.logline("[i] 演示模式：未打开外部页面。")
-
-    def locate(self):
-        self.logline("[i] 演示模式：未获取本机位置。")
-
-
-def prepare_demo(directory):
-    ui.CONFIG = directory / "config.yaml"
-    ui.SECRETS = directory / "secrets_local.json"
-    cfg = ui.yaml.safe_load((ROOT / "config.example.yaml").read_text(encoding="utf-8"))
-    cfg["live_url"] = "https://live.example.com/classroom"
-    cfg["alert"]["webhook"]["url"] = ""
-    cfg["rules"]["semantic"]["enabled"] = False
-    cfg["auto_sign"]["enabled"] = False
-    cfg["location"] = {"lat": ui.DEFAULT_LAT, "lng": ui.DEFAULT_LNG}
-    cfg["ui"] = {"appearance": "dark"}
-    ui.CONFIG.write_text(ui.yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
-    ui.SECRETS.write_text(json.dumps({
-        "skl_username": "2026001001", "skl_password": "demo-password",
-    }), encoding="utf-8")
-
-
-def render(app, output, scale, page):
-    # Match the requested number of physical pixels, independent of Windows DPI.
-    dpi = app._get_window_scaling()
-    ui.ctk.set_widget_scaling(scale / dpi)
-    ui.ctk.set_window_scaling(scale / dpi)
-    app.maxsize(4000, 3000)
-    app.geometry("1180x760+0+0")
-    app.update()
-    app._apply_log_colors()
-    app.start_monitor()
-    app.after_cancel(app._tick_job)
-    app._tick_job = None
-    app._select_tab(page)
-    # Let Tk finish layout and the normal log queue deliver the demo events.
-    deadline = time.monotonic() + 0.4
-    while time.monotonic() < deadline:
-        app.update()
-        time.sleep(0.02)
-    app._metrics["time"].configure(text="00:02:18")
-    output.mkdir(parents=True, exist_ok=True)
-    paths = []
-    for theme in ("dark", "light"):
-        if app._appearance != theme:
-            app.toggle_theme()
-        app.update()
-        # Capture only this process's Tk client window. PrintWindow excludes the
-        # desktop, title bar, pointer and automation overlays, even when occluded.
-        image = ImageGrab.grab(window=app.winfo_id())
-        expected = (round(1180 * scale), round(760 * scale))
-        if image.size != expected:
-            raise RuntimeError(f"Expected native render {expected}, received {image.size}")
-        for x, color in ((0, ui.design.CARD), (image.width - 1, ui.design.BG)):
-            expected_color = tuple(bytes.fromhex(app._theme_color(color).lstrip("#")))
-            if image.getpixel((x, image.height - 1)) != expected_color:
-                raise RuntimeError("Window is clipped by the display; retry with a smaller --scale.")
-        path = output / f"{theme}.png"
-        image.save(path, format="PNG", optimize=True)
-        paths.append({"file": str(path), "pixels": image.size, "format": "PNG"})
-    return paths
 
 
 def screenshots(args):
-    (ROOT / "build").mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="ui-demo-", dir=ROOT / "build") as temp:
-        prepare_demo(Path(temp))
-        app = DemoApp()
-        if args.preview:
-            app._select_tab(args.page)
-            app.mainloop()
-            if app.worker:
-                app.worker.join(timeout=2)
-            return
-        try:
-            result = render(app, args.output.resolve(), args.scale, args.page)
-        finally:
-            app.stop_event.set()
-            if app.worker:
-                app.worker.join(timeout=2)
-            app.destroy()
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+    # Set before creating QGuiApplication so screenshots exercise real Qt DPI
+    # layout/rasterization, rather than scaling a previously captured bitmap.
+    import os
+    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
+    os.environ["QT_SCALE_FACTOR"] = str(args.scale)
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtTest import QTest
+    from PySide6.QtCore import qInstallMessageHandler
+    import shiboken6
+    from hdusign.demo import DemoController, prepare_demo
+    from hdusign.qt_app import create_engine
 
+    messages = []
+    qInstallMessageHandler(lambda kind, context, message: messages.append(message))
+    app = QGuiApplication([])
+    app.setQuitOnLastWindowClosed(False)
+    with tempfile.TemporaryDirectory(prefix="hdusign-demo-") as temporary:
+        root = Path(temporary)
+        prepare_demo(root)
+        controller = DemoController(root)
+        engine, window = create_engine(controller, app)
+        window.setProperty("settingsVisible", args.page == "extras")
+        if args.preview:
+            app.setQuitOnLastWindowClosed(True)
+            app.exec()
+        else:
+            controller.populate_monitor()
+            controller._clock.stop()
+            controller._publish(elapsed="00:02:18")
+            args.output.mkdir(parents=True, exist_ok=True)
+            result = []
+            for theme in ("dark", "light"):
+                controller._publish(dark=theme == "dark")
+                QTest.qWait(350)
+                image = window.grabWindow()
+                path = args.output.resolve() / f"{theme}.png"
+                if image.isNull() or not image.save(str(path)):
+                    raise RuntimeError("Qt Quick screenshot capture failed")
+                if (image.width(), image.height()) != (round(1180 * args.scale), round(760 * args.scale)):
+                    raise RuntimeError("Screenshot DPI did not match --scale")
+                result.append(dict(file=str(path), pixels=[image.width(), image.height()],
+                                   renderer=str(window.rendererInterface().graphicsApi())))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        controller.shutdown()
+        if controller.worker:
+            controller.worker.join(timeout=2)
+        shiboken6.delete(engine)
+    if messages:
+        raise RuntimeError("Qt warnings: " + "\n".join(messages))
 
 
 def generate_icon():
@@ -154,7 +78,7 @@ def generate_icon():
         draw.rounded_rectangle(
             (x, 128 - height / 2, x + 20, 128 + height / 2),
             radius=8, fill="#ffffff")
-    image.save(Path(__file__).resolve().parents[1] / "assets" / "echosign.ico",
+    image.save(Path(__file__).resolve().parents[1] / "assets" / "hdusign.ico",
                sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 
 
@@ -165,8 +89,8 @@ def main():
     shots = commands.add_parser("screenshots", help="Render the real UI with demo data")
     shots.add_argument("--preview", action="store_true")
     shots.add_argument("--output", type=Path, default=ROOT / "assets/screenshots")
-    shots.add_argument("--scale", type=float, default=1.5)
-    shots.add_argument("--page", choices=("basic", "signin", "extras"), default="basic")
+    shots.add_argument("--scale", type=float, default=1.0)
+    shots.add_argument("--page", choices=("basic", "extras"), default="basic")
     args = parser.parse_args()
     if args.command == "icon":
         generate_icon()

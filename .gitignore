@@ -19,7 +19,7 @@ browser_profile/
 dist/
 build/
 *.spec
-!tools/EchoSign.spec
+!tools/HDUSign.spec
 sign_out.txt
 sign_err.txt
 *.zip

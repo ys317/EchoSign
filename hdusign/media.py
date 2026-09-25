@@ -16,9 +16,9 @@ from urllib.parse import urlsplit
 
 import numpy as np
 
-from echosign.audio import SAMPLE_RATE
-from echosign.processes import hidden_subprocess_options
-from echosign.runtime import resource_root
+from hdusign.audio import SAMPLE_RATE
+from hdusign.processes import hidden_subprocess_options
+from hdusign.runtime import resource_root
 
 
 # Absorb a network catch-up burst or a slow recognizer without losing audio.
@@ -64,11 +64,11 @@ def find_ffmpeg() -> str:
     if bundled.is_file():
         return str(bundled)
     if getattr(sys, "frozen", False):
-        raise MediaError("直播音频组件缺失，请重新完整解压 EchoSign 发行包。", kind="terminal")
+        raise MediaError("直播音频组件缺失，请重新完整解压 HDUSign 发行包。", kind="terminal")
     installed = shutil.which("ffmpeg")
     if installed:
         return installed
-    raise MediaError("未找到 FFmpeg 音频组件，请使用完整的 EchoSign 发行包或安装 FFmpeg。", kind="terminal")
+    raise MediaError("未找到 FFmpeg 音频组件，请使用完整的 HDUSign 发行包或安装 FFmpeg。", kind="terminal")
 
 
 def _checked_headers(headers: dict | None) -> dict[str, str]:
@@ -100,7 +100,7 @@ def _tls_options(executable: str) -> list[str]:
 
     certificate = certifi.where()
     if not Path(certificate).is_file():
-        raise MediaError("直播连接证书缺失，请重新完整解压 EchoSign 发行包。", kind="terminal")
+        raise MediaError("直播连接证书缺失，请重新完整解压 HDUSign 发行包。", kind="terminal")
     return ["-tls_verify", "1", "-ca_file", certificate]
 
 
@@ -192,7 +192,7 @@ class FFmpegAudioSource:
         finally:
             command.clear()
         if process is None:
-            raise MediaError("无法启动直播音频组件，请重新完整解压 EchoSign 发行包。", kind="terminal")
+            raise MediaError("无法启动直播音频组件，请重新完整解压 HDUSign 发行包。", kind="terminal")
 
         decoder = _Decoder(process, self.chunk_frames, stop)
         try:
@@ -244,11 +244,11 @@ class _Decoder:
         self.received = False
         self.last_data = time.monotonic()
         self.reader = threading.Thread(target=self._read_audio,
-                                       name="EchoSign live audio", daemon=True)
+                                       name="HDUSign live audio", daemon=True)
         self.stderr_reader = threading.Thread(target=self._read_stderr,
-                                              name="EchoSign media errors", daemon=True)
+                                              name="HDUSign media errors", daemon=True)
         self.supervisor = threading.Thread(target=self._supervise,
-                                           name="EchoSign media supervisor", daemon=True)
+                                           name="HDUSign media supervisor", daemon=True)
 
     def stopping(self) -> bool:
         return self.shutdown.is_set() or (self.stop is not None and self.stop.is_set())
@@ -346,7 +346,7 @@ class _Decoder:
             self.process.kill()
             self.process.wait(timeout=_STOP_GRACE_SECONDS)
         except (OSError, subprocess.TimeoutExpired):
-            self._fail("直播音频组件未响应停止，请重新启动 EchoSign。", "terminal")
+            self._fail("直播音频组件未响应停止，请重新启动 HDUSign。", "terminal")
 
     def _supervise(self) -> None:
         code = None
@@ -373,9 +373,9 @@ class _Decoder:
                 try:
                     pipe.close()
                 except (OSError, ValueError):
-                    self._fail("直播音频组件未响应停止，请重新启动 EchoSign。", "terminal")
+                    self._fail("直播音频组件未响应停止，请重新启动 HDUSign。", "terminal")
             if self.reader.is_alive() or self.stderr_reader.is_alive():
-                self._fail("直播音频组件未响应停止，请重新启动 EchoSign。", "terminal")
+                self._fail("直播音频组件未响应停止，请重新启动 HDUSign。", "terminal")
             # Classify only after both readers have been joined. In particular,
             # a final HTTP/TLS error must not arrive after a generic exit error
             # has already been published to the monitor.
@@ -405,8 +405,8 @@ class _Decoder:
                 try:
                     pipe.close()
                 except (OSError, ValueError):
-                    self._fail("直播音频组件未响应停止，请重新启动 EchoSign。", "terminal")
+                    self._fail("直播音频组件未响应停止，请重新启动 HDUSign。", "terminal")
         else:
             self.supervisor.join(timeout=2 * _STOP_GRACE_SECONDS + 3 * _THREAD_JOIN_SECONDS + 1)
             if self.supervisor.is_alive():
-                raise MediaError("直播音频组件未响应停止，请重新启动 EchoSign。", kind="terminal")
+                raise MediaError("直播音频组件未响应停止，请重新启动 HDUSign。", kind="terminal")

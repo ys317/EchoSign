@@ -4,23 +4,25 @@ Windows x64，Python 3.13。
 
 ## 本地运行
 
+v1.9 保留左右大面板首页，提供账号密码、课程列表及一个随开课时间切换的操作按钮；活动记录默认折叠，其余选项集中在设置页。按钮在未开课、已开课、已预约和监控中分别显示预约直播、开始监控、取消预约和停止监控。每秒检查时间边界，无需重新选课。首页登录向 `login_live(credentials=...)` 传入账号快照，使用空浏览器上下文自动填写；原有手动直播账号入口继续保留。会话记录账号标识，启动时不恢复已知属于另一账号的直播会话。签到浏览器路径由账号摘要区分，避免改账号后沿用旧签到会话。
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m playwright install chromium
-.\.venv\Scripts\pythonw.exe -m echosign
+.\.venv\Scripts\pythonw.exe -m hdusign
 ```
 
 将发行包中的 `models/` 复制到项目根目录，即可使用本地识别模型。个人配置沿用根目录中的 `config.yaml` 等文件，不应提交到仓库。
 
-图形界面与命令行共用 `python -m echosign` 入口：
+图形界面与命令行共用 `python -m hdusign` 入口：
 
 ```powershell
-python -m echosign --help
-python -m echosign devices
-python -m echosign run --config config.yaml
-python -m echosign test --help
-python -m echosign code
+python -m hdusign --help
+python -m hdusign devices
+python -m hdusign run --config config.yaml
+python -m hdusign test --help
+python -m hdusign code
 ```
 
 `demo` 用于检查匹配规则，`--login` 打开登录浏览器。`test` 与 `run` 使用配置中的通知和签到选项；离线调试时应关闭 `auto_sign.enabled` 并清空 Webhook。
@@ -29,14 +31,14 @@ python -m echosign code
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pyinstaller==6.22.2
-.\.venv\Scripts\python.exe tools/release.py build --ffmpeg-bundle build/ffmpeg-audio/ffmpeg-8.1.2-echosign-audio-win64.zip
+.\.venv\Scripts\python.exe tools/release.py build --ffmpeg-bundle build/ffmpeg-audio/ffmpeg-8.1.2-hdusign-audio-win64.zip
 ```
 
 构建工具准备匹配的浏览器和语义模型，在 `build/releases/<版本>/` 生成独立目录，再打包到 `dist/releases/<版本>/`。语音模型从项目根目录的 `models/` 读取。首次准备缺失依赖时需要联网。
 
 音频组件由 `.github/workflows/ffmpeg-audio-windows.yml` 使用 `tools/ffmpeg-build/` 中的脚本构建。先下载并解压该流水线产物，将音频 ZIP 及其同名 `-source.tar.xz` 对应源码归档放在同一目录，再传入 `--ffmpeg-bundle`。构建工具核对二进制、对应源码及构建记录，执行离线音频检查，并将对应源码一并放入最终发布目录；发布时上传安装包、对应源码和校验文件。
 
-版本号统一维护在 `echosign/__init__.py`，Windows 版本资源由构建工具自动生成。发布前先定稿代码、文档和图片，再构建；工具会校验源码摘要，避免上传与代码不一致的包。
+版本号统一维护在 `hdusign/__init__.py`，Windows 版本资源由构建工具自动生成。发布前先定稿代码、文档和图片，再构建；工具会校验源码摘要，避免上传与代码不一致的包。
 
 维护者提交代码并推送对应版本标签后，可运行 `python tools/release.py publish --notes <发布说明.md>`，将已构建的 ZIP 发布到 GitHub `origin` 仓库。
 
@@ -44,12 +46,12 @@ python -m echosign code
 
 | 目录 | 内容 |
 | --- | --- |
-| `echosign/` | 应用代码，按职责划分模块 |
+| `hdusign/` | 应用代码，按职责划分模块 |
 | `tests/` | 自动化测试与音频样本 |
-| `tools/` | `release.py` 构建与发布；`assets.py` 资源维护；`EchoSign.spec` 打包配置 |
+| `tools/` | `release.py` 构建与发布；`assets.py` 资源维护；`HDUSign.spec` 打包配置 |
 | `assets/`、`docs/` | 图标、截图与文档 |
 
-应用内部由 `audio.py` 负责采集和转写，`rules.py` 负责匹配与提码，`monitor.py` 连接识别流程；`attendance.py` 管理签到任务与结果，`browser.py` 负责网页操作。`gui.py` 管理界面状态，`ui.py` 集中维护主题和通用控件，`runtime.py` 处理源码与便携版的资源路径。
+应用内部由 `audio.py` 负责采集和转写，`rules.py` 负责匹配与提码，`monitor.py` 连接识别流程；`attendance.py` 管理签到任务与结果，`browser.py` 负责网页操作。`desktop_controller.py` 在线程间传递事件并维护增量数据模型，`qt_app.py` 启动 Qt Quick，`qml/` 维护主题和控件，`runtime.py` 处理源码与便携版的资源路径。
 
 `live.py` 只通过杭电已验证的直播接口读取单节 HTTP(S)-FLV 播放信息，使用独立的直播登录态；`media.py` 通过隐藏的 FFmpeg 子进程输出 16 kHz 单声道音频，不解码画面。直播输入按网络速度读取，不使用 `-re` 限速：限速不能平滑断续后的补发突发，却会在服务器时间戳跳变时一直等待到空闲超时。约 10 秒的有界队列吸收补发突发和识别器的短暂停顿，识别器通常快于实时，积压会在数秒内消化。队列仍然填满时丢弃整段积压、从当前直播声音继续，并在下一块音频前报告跳过的时长；监控层据此重置识别器与未确认的候选码，不断开连接，也不把它计入故障窗口，断点两侧的数字不会拼成签到码。断流不冲刷未完成的识别结果。媒体请求只携带取流令牌和必要的公开请求头，不转发站点 Cookie/JWT；HTTPS 验证证书，暂不接受 HLS。
 
@@ -59,9 +61,22 @@ python -m echosign code
 
 源码使用后台音频需在 PATH 中提供 FFmpeg；便携包内置经过核验的精简音频组件。内置组件通过 Windows Schannel 验证服务器身份与证书信任，源码使用的其他 FFmpeg 后端沿用 certifi 的 CA 文件。HTTP 输入禁止未经验证地跳转到 HTTPS；网络输入继续限制为 HTTP(S)-FLV。组件的许可证、构建过程和对应源码见[第三方声明](third-party.md)。离线自检不依赖系统 PATH 或外部媒体服务。
 
-界面分为「课堂 / 签到 / 更多」，手动网址默认收起。直播登录成功后和有保存登录的启动阶段自动读取 `/v1/vod_live/t-1`，与平台首页一致使用 `liveDay=0`；分页合并、去重后按北京时间在本地筛选今天与明天的课程并排序。支持取消和异常提示，不返回残缺列表。选中课程才生成地址并启用后台音频，刷新不自动换课。未来课程保存为 `config.yaml` 的 `scheduled_course` 课程元数据，界面每秒检查读取到的 `courBeginTime`，到点后走原 `start_monitor()` 流程。列表和预约请求在工作线程执行，主线程更新控件；相关测试使用模拟响应，不访问学校服务。
+界面使用 PySide6 6.11.2 / Qt Quick，分为「直播 / 设置」。`desktop_controller.py` 保留原配置结构和服务调用，后台线程接收配置快照，只有主线程更新模型。每个状态字段分别通知 QML；计时、转写与签到码不使整页状态绑定同时失效。活动记录折叠时不创建列表，展开后使用 `ListView.reuseItems` 复用行；详细日志最多保留 1500 条，签到事件保留 20 条。每批最多消费 160 行，中间转写合并为最后一条；队列积压时 16 ms 后继续，运行时 33 ms、空闲时 100 ms 检查。GPU 后端由 Qt 自动选择，Windows 本机验证为 Direct3D 11。
 
-设置页仅布局当前页，切换时更新前后两个页签的现有形状，避免重复生成圆角和重建字体布局；隐藏页清除布局缓存，防止 DPI 调整后重新出现。日志队列每轮最多处理 160 条，并有 8 毫秒处理预算：一次插入带标签的文本、一次滚动，只绘制最后一条预览，保留完整日志与确认码的顺序。积压时 10 毫秒后继续，空闲时每 100 毫秒检查。正常可见窗口的本机对照中，切页回调中位耗时由约 35 毫秒降到 9 毫秒，第二轮空闲刷新由约 91 毫秒降到 39 毫秒；160 条普通日志的批次处理由约 1008 毫秒降到 6 毫秒。这些是本机短时测量，并非所有设备的响应保证。
+直播登录后及存在保存登录态的启动阶段，读取 `/v1/vod_live/t-1` 的今明课程。未来课程保存为 `scheduled_course`，保持软件运行时到点调用原监控服务；换账号清空旧选择和预约。界面停止与关闭通过取消事件通知后台任务，收到完成事件后关闭窗口；网络调用仍受服务自身的超时约束。
+
+旧 `gui.py` / `ui.py` 暂时保留为迁移行为回归基线，默认入口与发行包不加载它们。运行全部历史测试需安装 `requirements-dev.txt`；应用只需要 `requirements.txt`。
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe tools/assets.py screenshots --scale 1.5
+.\.venv\Scripts\python.exe tools/assets.py screenshots --preview
+.\.venv\Scripts\python.exe tools/profile_desktop.py
+```
+
+截图与压力测试使用临时演示配置，不读取个人账号，也不调用登录、音频、签到或通知服务。`profile_desktop.py` 每 33 ms 注入 160 条模拟转写/日志，同时通过真实 Qt 鼠标事件切换聚焦。它报告队列处理、输入分发与事件循环间隔，不把回调耗时等同于屏幕帧率。首轮本机 Direct3D 11 测试中，展开记录时队列处理 p95 约 2.75 ms、输入分发 p95 约 9.15 ms，无剩余队列；结果不代表实际 ASR、浏览器同时运行或不同设备上的帧率保证。
+
+打包钩子只收集实际使用的 Qt QML / Quick / Basic Controls 模块；Qt DLL 与 QML 保持为可替换文件。发行包自检会加载并渲染深浅主题，再验证模型、浏览器和 FFmpeg。对应的使用模块、许可证和替换说明见[第三方声明](third-party.md)。
 
 `location.py` 在用户点击按钮时，通过 Windows 自带 PowerShell 调用系统定位，返回经纬度及可用精度；不使用 IP 定位，也不反查街道地址。请求在工作线程运行，有 20 秒总超时，结果在主线程填入表单，失败保留原值。`processes.py` 统一后台命令的 Windows 无控制台启动参数；源码图形界面使用 `pythonw.exe` 启动，便携版以无控制台方式打包。
 

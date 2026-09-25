@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import requests
 
-from echosign import browser, live
+from hdusign import browser, live
 
 
 ORIGIN = "https://course.hdu.edu.cn"
@@ -482,6 +482,33 @@ class LiveLoginTests(unittest.TestCase):
         self.playwright.chromium.launch.assert_not_called()
         browser.load_secrets.assert_not_called()
         browser._cleanup_stale_profile.assert_not_called()
+
+    def test_entered_credentials_override_previous_manual_account_in_fresh_context(self):
+        stored = self.root / "live_session.json"
+        stored.write_text(json.dumps({"origin": ORIGIN, "login_mode": "manual"}), encoding="utf-8")
+        credentials = {"skl_username": "new-student", "skl_password": "new-password"}
+        self.page.url = "https://sso.hdu.edu.cn/login"
+        self.page.wait_for_timeout.side_effect = lambda _: setattr(self.page, "url", ORIGIN + "/#/list-live")
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(live.login_live(PAGE, credentials=credentials), 0)
+        self.playwright.chromium.launch_persistent_context.assert_not_called()
+        self.live_browser.new_context.assert_called_once_with()
+        browser.try_sso_login.assert_called_once_with(self.page, credentials)
+        browser.load_secrets.assert_not_called()
+        saved = json.loads(stored.read_text(encoding="utf-8"))
+        self.assertEqual(saved["username"], "new-student")
+        self.assertNotIn("login_mode", saved)
+        self.assertNotIn("new-password", stored.read_text(encoding="utf-8") + output.getvalue())
+        self.context.close.assert_called_once()
+        self.live_browser.close.assert_called_once()
+
+    def test_attendance_profiles_follow_the_entered_account(self):
+        first = browser.account_profile({"skl_username": "student-a"})
+        self.assertEqual(first, browser.account_profile({"skl_username": " student-a "}))
+        self.assertNotEqual(first, browser.account_profile({"skl_username": "student-b"}))
+        self.assertTrue(first.is_relative_to(browser.PROFILE))
+        self.assertEqual(first, browser.account_profile({"skl_username": "student-a", "skl_password": "changed"}))
 
     def test_login_cancellation_before_launch_or_after_probe_does_not_save(self):
         stop = threading.Event()

@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit, urlunsplit
 import requests
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
-from echosign.runtime import application_root, configure_browser_runtime
+from hdusign.runtime import application_root, configure_browser_runtime
 
 
 _SITE_HOSTS = frozenset(("course.hdu.edu.cn",
@@ -218,16 +218,16 @@ def _saved_auth(origin: str | None = None) -> tuple[str, list[dict], str]:
     if (parsed is None or parsed.scheme != "https" or parsed.hostname not in _SITE_HOSTS
             or parsed.port not in (None, 443) or parsed.path not in ("", "/")
             or parsed.query or parsed.fragment):
-        raise LiveLoginRequired("请先点击“登录直播”，完成本站登录。")
+        raise LiveLoginRequired("请先点击“登录并读取课程”，完成本站登录。")
     saved_origin = "https://" + parsed.hostname
     if origin is not None and origin != saved_origin:
-        raise LiveLoginRequired("请先点击“登录直播”，完成本站登录。")
+        raise LiveLoginRequired("请先点击“登录并读取课程”，完成本站登录。")
     cookies = _cookies_for_origin(auth.get("cookies"), saved_origin)
     jwt = auth.get("jwt_token", "")
     if not _plain(jwt) or not jwt.isascii():
-        raise LiveLoginRequired("直播登录资料无效，请重新点击“登录直播”。")
+        raise LiveLoginRequired("直播登录资料无效，请重新点击“登录并读取课程”。")
     if not cookies and not jwt:
-        raise LiveLoginRequired("直播登录已失效，请重新点击“登录直播”。")
+        raise LiveLoginRequired("直播登录已失效，请重新点击“登录并读取课程”。")
     return saved_origin, cookies, jwt
 
 
@@ -256,7 +256,7 @@ def _authenticated_session(origin: str, config: dict | None = None) -> tuple[req
 def _checked_payload(response, *, action: str) -> dict:
     try:
         if response.status_code in (301, 302, 303, 307, 308, 401):
-            raise LiveLoginRequired("请先点击“登录直播”，完成本站登录。")
+            raise LiveLoginRequired("请先点击“登录并读取课程”，完成本站登录。")
         if response.status_code == 403:
             raise LiveError("当前账号无权读取直播课程。" if action == "list" else "当前账号无权观看这节直播。")
         if _transient_status(response.status_code):
@@ -345,7 +345,7 @@ def _course_list_page(session, origin: str, page: int, live_day: int = 0) -> dic
         raise LiveError("无法读取直播课程，请检查网络和直播登录状态。") from None
     payload = _checked_payload(response, action="list")
     if _status(payload.get("status"), 401) or _status(payload.get("code"), 401):
-        raise LiveLoginRequired("直播登录已失效，请重新点击“登录直播”。")
+        raise LiveLoginRequired("直播登录已失效，请重新点击“登录并读取课程”。")
     if _status(payload.get("status"), 403) or _status(payload.get("code"), 403):
         raise LiveError("当前账号无权读取直播课程。")
     if _transient_status(payload.get("status")) or _transient_status(payload.get("code")):
@@ -452,7 +452,7 @@ class LiveClient:
             raise LiveError("直播连接已关闭，请重新开始监控。")
         payload = self._get_info()
         if _status(payload.get("status"), 401) or _status(payload.get("code"), 401):
-            raise LiveLoginRequired("直播登录已失效，请重新点击“登录直播”。")
+            raise LiveLoginRequired("直播登录已失效，请重新点击“登录并读取课程”。")
         if _status(payload.get("status"), 403) or _status(payload.get("code"), 403):
             raise LiveError("当前账号无权观看这节直播。")
         info = payload.get("data")
@@ -566,7 +566,7 @@ def _saved_manual_login(origin: str) -> bool:
 
 
 def _save_session(origin: str, cookies: list[dict], jwt: str,
-                  *, login_mode: str | None = None) -> None:
+                  *, login_mode: str | None = None, username: str | None = None) -> None:
     root = application_root()
     temporary = None
     failed = False
@@ -578,6 +578,8 @@ def _save_session(origin: str, cookies: list[dict], jwt: str,
                      "cookies": cookies, "jwt_token": jwt}
             if login_mode == "manual":
                 saved["login_mode"] = "manual"
+            if username is not None:
+                saved["username"] = username
             json.dump(saved, stream, ensure_ascii=False)
             stream.flush()
             os.fsync(stream.fileno())
@@ -594,14 +596,15 @@ def _save_session(origin: str, cookies: list[dict], jwt: str,
         raise LiveError("无法保存直播登录资料，请检查程序目录的写入权限。")
 
 
-def login_live(page_url: str, stop=None, *, switch_account: bool = False) -> int:
-    """Keep manual account selection on later logins without reusing old profiles."""
+def login_live(page_url: str, stop=None, *, switch_account: bool = False,
+               credentials: dict | None = None) -> int:
+    """Explicit credentials use a fresh context; manual logins remain available."""
     origin = parse_live_origin(page_url)
     if stop is not None and stop.is_set():
         print("直播登录已取消。")
         return 1
-    manual_login = switch_account or _saved_manual_login(origin)
-    from echosign import browser
+    manual_login = switch_account or (credentials is None and _saved_manual_login(origin))
+    from hdusign import browser
 
     configure_browser_runtime()
     context = None
@@ -609,11 +612,12 @@ def login_live(page_url: str, stop=None, *, switch_account: bool = False) -> int
     try:
         with sync_playwright() as playwright:
             try:
-                if manual_login:
+                if manual_login or credentials is not None:
                     live_browser = playwright.chromium.launch(
                         headless=False, args=browser._browser_args(), timeout=30000)
                     context = live_browser.new_context()
-                    print("请在新窗口手动登录要使用的直播账号。")
+                    print("请在新窗口手动登录要使用的直播账号。" if manual_login
+                          else "正在使用填写的账号登录，需要验证码时请在窗口中完成。")
                 else:
                     context = playwright.chromium.launch_persistent_context(
                         str(application_root() / "live_profile"), headless=False,
@@ -640,7 +644,7 @@ def login_live(page_url: str, stop=None, *, switch_account: bool = False) -> int
                         if not manual_login and not attempted and fill_attempts < 2:
                             try:
                                 page.wait_for_selector("input[type=password]", timeout=1000)
-                                secrets = browser.load_secrets()
+                                secrets = credentials if credentials is not None else browser.load_secrets()
                                 ready = _url(page.url)
                                 if (ready is not None and ready.scheme == "https"
                                         and ready.port in (None, 443)
@@ -671,14 +675,16 @@ def login_live(page_url: str, stop=None, *, switch_account: bool = False) -> int
                                     print("直播登录已取消。")
                                     return 1
                                 if _plain(jwt) and jwt.isascii() and (jwt or cookies):
+                                    identity = ({"username": str(credentials.get("skl_username", "")).strip()}
+                                                if credentials is not None and not manual_login else {})
                                     _save_session(origin, cookies, jwt,
-                                                  login_mode="manual" if manual_login else None)
+                                                  login_mode="manual" if manual_login else None, **identity)
                                     print("直播登录已保存，可启动后台音频监控。")
                                     return 0
                         except PlaywrightError:
                             pass
                     page.wait_for_timeout(250)
-                print("直播登录超时，请重新点击“登录直播”并完成验证。")
+                print("直播登录超时，请重新点击“登录并读取课程”并完成验证。")
                 return 1
             finally:
                 try:

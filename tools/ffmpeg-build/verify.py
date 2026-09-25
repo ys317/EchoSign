@@ -82,7 +82,7 @@ def audio_check(ffmpeg: Path, record: Path) -> tuple[dict, bytes]:
     version = checked(command + ["-version"]).decode()
     configuration = checked(command + ["-buildconf"]).decode()
     license_text = checked(command + ["-L"]).decode()
-    if not version.startswith("ffmpeg version 8.1.2-echosign-audio "):
+    if not version.startswith("ffmpeg version 8.1.2-hdusign-audio "):
         raise AssertionError("Unexpected FFmpeg version")
     for flag in ("--disable-gpl", "--disable-nonfree", "--disable-version3", "--disable-autodetect", "--enable-schannel"):
         if flag not in configuration:
@@ -148,7 +148,7 @@ def https_check(ffmpeg: Path, flv: bytes) -> list[dict]:
     crl_thread = threading.Thread(target=crl_server.serve_forever, daemon=True)
     crl_thread.start()
     ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "EchoSign CI " + uuid.uuid4().hex)])
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "HDUSign CI " + uuid.uuid4().hex)])
     ca = (x509.CertificateBuilder().subject_name(ca_name).issuer_name(ca_name)
           .public_key(ca_key.public_key()).serial_number(x509.random_serial_number())
           .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=3))
@@ -228,7 +228,7 @@ def https_check(ffmpeg: Path, flv: bytes) -> list[dict]:
                         check_pcm(result.stdout)
                     # Windows CryptoAPI matches a textual IP host against a dNSName
                     # entry, unlike RFC 6125 verifiers. Public CAs do not issue such
-                    # names and EchoSign only resolves DNS host names, so this
+                    # names and HDUSign only resolves DNS host names, so this
                     # platform behaviour is recorded without being asserted.
                     if should_pass is None:
                         continue

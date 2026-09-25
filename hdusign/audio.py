@@ -32,7 +32,7 @@ class StreamingASR:
             # Contextual biasing needs beam search; phrases are spelt one token per
             # character for this character-level Chinese model. The file is only
             # read while the recognizer is being built.
-            handle, name = tempfile.mkstemp(prefix="echosign-hotwords-", suffix=".txt")
+            handle, name = tempfile.mkstemp(prefix="hdusign-hotwords-", suffix=".txt")
             hotwords_file = Path(name)
             with open(handle, "w", encoding="utf-8") as stream:
                 stream.write("\n".join(" ".join(h.replace(" ", "")) for h in hotwords) + "\n")
@@ -240,7 +240,7 @@ class LoopbackSource:
             finally:
                 finished.set()
 
-        worker = threading.Thread(target=_worker, name="EchoSign audio capture", daemon=True)
+        worker = threading.Thread(target=_worker, name="HDUSign audio capture", daemon=True)
         worker.start()
         try:
             while not stopping():

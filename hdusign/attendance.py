@@ -11,8 +11,8 @@ import tempfile
 import threading
 import time
 
-from echosign.processes import hidden_subprocess_options
-from echosign.runtime import application_root
+from hdusign.processes import hidden_subprocess_options
+from hdusign.runtime import application_root
 
 ROOT = application_root()
 
@@ -25,7 +25,7 @@ def write_json(path: Path, data: dict) -> None:
 
 def browser_command(*args: str) -> list[str]:
     prefix = [sys.executable] if getattr(sys, "frozen", False) else [
-        sys.executable, "-X", "utf8", "-m", "echosign"]
+        sys.executable, "-X", "utf8", "-m", "hdusign"]
     return [*prefix, *args]
 
 
@@ -93,7 +93,7 @@ class AutoSigner:
 
     def _start_worker(self) -> None:
         if self._worker is None:
-            self._worker = threading.Thread(target=self._run, name="EchoSign attendance", daemon=False)
+            self._worker = threading.Thread(target=self._run, name="HDUSign attendance", daemon=False)
             try:
                 self._worker.start()
             except Exception:
@@ -258,7 +258,7 @@ class AutoSigner:
         try:
             # Windowed executables may not expose stdout. Use a private result file
             # for both frozen and source runs; logs never determine success.
-            with tempfile.TemporaryDirectory(prefix="echosign-result-") as temporary:
+            with tempfile.TemporaryDirectory(prefix="hdusign-result-") as temporary:
                 result_path = Path(temporary) / "result.json"
                 proc = self._run_child([*cmd, "--result-file", str(result_path)])
                 if proc is None:
@@ -326,7 +326,7 @@ class _BrowserSession:
         if self.stop.is_set():
             raise InterruptedError("监控已停止")
         self.directory = Path(self.resources.enter_context(
-            tempfile.TemporaryDirectory(prefix="echosign-browser-")))
+            tempfile.TemporaryDirectory(prefix="hdusign-browser-")))
         log = self.resources.enter_context(tempfile.TemporaryFile())
         command = browser_command("--sign-worker", "--exchange-dir", str(self.directory))
         self.proc = self.resources.enter_context(subprocess.Popen(

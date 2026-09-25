@@ -1,4 +1,4 @@
-# Portable audio FFmpeg for EchoSign
+# Portable audio FFmpeg for HDUSign
 
 This recipe builds FFmpeg **8.1.2** from its signed official source release, using
 only internal audio codecs and Windows **Schannel**. GPL, nonfree, version-3-only
@@ -47,22 +47,22 @@ TLS verification before creating the distributable pair.
 
 The completed workflow produces these matched release assets:
 
-- `ffmpeg-8.1.2-echosign-audio-win64.zip`: a `ffmpeg/` directory containing
+- `ffmpeg-8.1.2-hdusign-audio-win64.zip`: a `ffmpeg/` directory containing
   `ffmpeg.exe`, `LICENSE`, `README.txt`, `license-notice.txt`, `version.txt`,
   `buildconf.txt`, `SOURCE.json` and compiler-runtime license notices.
-- `ffmpeg-8.1.2-echosign-audio-source.tar.xz`: complete upstream source and its
+- `ffmpeg-8.1.2-hdusign-audio-source.tar.xz`: complete upstream source and its
   verification material, exact recipe/workflow and the successful build record.
 - `SOURCE.json` and `SHA256SUMS`: tie the executable and the corresponding source
   archive to the same verified build. Publish the source asset alongside the ZIP.
 
-`SOURCE.json` uses `version: "8.1.2-echosign-audio"`, `tls_backend: "schannel"`,
+`SOURCE.json` uses `version: "8.1.2-hdusign-audio"`, `tls_backend: "schannel"`,
 `binary_sha256`, `source_archive` (an object containing `name` and `sha256`), and
 `configure_flags`. No executable is accepted by the packager after it changes
 following verification.
 
 ## Audio scope and application integration
 
-HTTP(S)-FLV is the only remote container used by EchoSign. HLS is disabled.
+HTTP(S)-FLV is the only remote container used by HDUSign. HLS is disabled.
 The build retains common internal audio decoders and local WAV, AAC, MP3, FLAC,
 Ogg, Matroska and MP4/MOV demuxers. AAC encoding and ADTS output support the
 existing `check_ffmpeg_runtime` round trip. Resampling, stereo-to-mono conversion
@@ -85,11 +85,11 @@ numeric-host bypass. The CI verifies valid DNS and IP certificates, wrong DNS,
 wrong IP and an untrusted issuer. Each rejected certificate must fail before
 the HTTP request is sent. An IP string placed only in a DNS SAN is recorded but
 not asserted: Windows CryptoAPI accepts it, public CAs do not issue such names,
-and EchoSign only connects to DNS host names. A local CRL
+and HDUSign only connects to DNS host names. A local CRL
 server keeps the certificate tests independent of public services while still
 exercising chain-revocation verification.
 
 Certificate-test stderr is retained with synthetic stream URLs and pointer
 addresses removed. The application can use those Schannel failure examples
 to classify terminal certificate errors without retaining stream credentials.
-The recipe does not change `echosign/media.py` or `tools/release.py`.
+The recipe does not change `hdusign/media.py` or `tools/release.py`.

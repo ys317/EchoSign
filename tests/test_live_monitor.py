@@ -9,10 +9,10 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from echosign import monitor
-from echosign.live import LiveEnded, LiveError, LiveLoginRequired, LiveTransientError
-from echosign.media import MediaError
-from echosign.rules import RuleMatcher, SignInWatcher
+from hdusign import monitor
+from hdusign.live import LiveEnded, LiveError, LiveLoginRequired, LiveTransientError
+from hdusign.media import MediaError
+from hdusign.rules import RuleMatcher, SignInWatcher
 
 
 class VirtualClock:
@@ -60,9 +60,9 @@ class LiveMonitorTests(unittest.TestCase):
         client.__enter__.return_value = client
         stream = SimpleNamespace(url="https://example.invalid/live.flv", headers={})
         client.resolve.return_value = stream
-        constructor = stack.enter_context(patch("echosign.live.LiveClient", return_value=client))
-        stack.enter_context(patch("echosign.media.find_ffmpeg", return_value="ffmpeg.exe"))
-        source = stack.enter_context(patch("echosign.media.FFmpegAudioSource"))
+        constructor = stack.enter_context(patch("hdusign.live.LiveClient", return_value=client))
+        stack.enter_context(patch("hdusign.media.find_ffmpeg", return_value="ffmpeg.exe"))
+        source = stack.enter_context(patch("hdusign.media.FFmpegAudioSource"))
         source.return_value.chunks.side_effect = factory or self.successful_frames
         source.return_value.discontinuities = 0
         source.return_value.skipped_seconds = 0.0
@@ -276,7 +276,7 @@ class LiveMonitorTests(unittest.TestCase):
     def test_expired_login_during_recovery_does_not_open_a_browser_or_retry(self):
         with ExitStack() as stack:
             f = self.setup_pipeline(stack, lambda stop: (chunk for chunk in [self.frame]))
-            login = stack.enter_context(patch("echosign.live.login_live"))
+            login = stack.enter_context(patch("hdusign.live.login_live"))
             f.client.resolve.side_effect = [f.stream, LiveLoginRequired("请重新登录直播")]
             with self.assertRaises(LiveLoginRequired):
                 monitor.cmd_run_live(self.cfg, self.stop)
@@ -450,7 +450,7 @@ class LiveMonitorTests(unittest.TestCase):
 
     def test_cancelled_start_opens_no_decoder_or_site_session(self):
         self.stop.set()
-        with patch("echosign.media.find_ffmpeg") as decoder, patch("echosign.live.LiveClient") as client:
+        with patch("hdusign.media.find_ffmpeg") as decoder, patch("hdusign.live.LiveClient") as client:
             monitor.cmd_run_live(self.cfg, self.stop)
         decoder.assert_not_called()
         client.assert_not_called()

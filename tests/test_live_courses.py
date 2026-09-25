@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import requests
 
-from echosign import live
+from hdusign import live
 
 
 ORIGIN = "https://course.hdu.edu.cn"
@@ -192,7 +192,7 @@ class LiveCourseListTests(unittest.TestCase):
 
     def test_config_origin_must_match_the_saved_authenticated_origin(self):
         self.save_auth(origin=VPN, cookies=[cookie(".webvpn.hdu.edu.cn")])
-        with self.assertRaisesRegex(live.LiveLoginRequired, "登录直播"):
+        with self.assertRaisesRegex(live.LiveLoginRequired, "登录并读取课程"):
             self.list({"live_url": ORIGIN + "/#/home",
                        "browser": {"bypass_proxy": True}})
         self.get.assert_not_called()

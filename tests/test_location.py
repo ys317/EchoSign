@@ -6,7 +6,7 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from echosign import location
+from hdusign import location
 
 
 class LocationTests(unittest.TestCase):

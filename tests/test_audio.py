@@ -8,7 +8,7 @@ import wave
 
 import numpy as np
 
-from echosign.audio import SAMPLE_RATE, StreamingASR, StreamingResampler, WavFileSource, resample_to_16k
+from hdusign.audio import SAMPLE_RATE, StreamingASR, StreamingResampler, WavFileSource, resample_to_16k
 
 
 class FinalizationTests(unittest.TestCase):

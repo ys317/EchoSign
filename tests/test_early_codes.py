@@ -7,8 +7,8 @@ from unittest.mock import Mock
 
 import numpy as np
 
-from echosign.monitor import AudioClock, make_watcher, run_pipeline
-from echosign.rules import RuleMatcher, SignInWatcher
+from hdusign.monitor import AudioClock, make_watcher, run_pipeline
+from hdusign.rules import RuleMatcher, SignInWatcher
 
 
 class EarlyCodeTests(unittest.TestCase):

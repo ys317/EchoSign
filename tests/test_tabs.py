@@ -4,7 +4,7 @@ import tempfile
 import time
 import unittest
 
-from tools.assets import DemoApp, prepare_demo, ui
+from legacy_demo import DemoApp, prepare_demo, ui
 
 
 class TabTests(unittest.TestCase):
@@ -52,7 +52,7 @@ class TabTests(unittest.TestCase):
         canvas.yview_moveto(.4)
         app.update_idletasks()
         scroll = canvas.yview()
-        for key in ("signin", "extras", "basic") * 3:
+        for key in ("extras", "basic") * 3:
             app._select_tab(key)
             app.update()
             self.assertTrue(app._pages[key].winfo_viewable())
@@ -76,19 +76,21 @@ class TabTests(unittest.TestCase):
                 for theme in ("light", "dark"):
                     if app._appearance != theme:
                         app.toggle_theme()
-                    for key in ("extras", "signin", "basic"):
+                    for key in ("extras", "basic"):
                         app._select_tab(key)
                         app.update_idletasks()
                         for name, button in app._tabs.items():
                             selected = name == key
                             background = app._theme_color(
-                                ui.design.TAB_SELECTED if selected else ui.design.TAB_BG)
+                                ui.design.GHOST_HOVER if selected else ui.design.CARD)
                             foreground = app._theme_color(ui.design.TXT if selected else ui.design.TXT2)
                             self.assertEqual(button._text_label.cget("background"), background)
                             self.assertEqual(button._text_label.cget("foreground"), foreground)
                             self.assertEqual(button._canvas.itemcget("inner_parts", "fill"), background)
                             requested_font = app.tk.splitlist(button._text_label.cget("font"))
-                            self.assertEqual("bold" in requested_font[2:], selected)
+                            emphasized = ("bold" in requested_font[2:] or
+                                          ui.design.FH != ui.design.F and requested_font[0] == ui.design.FH)
+                            self.assertEqual(emphasized, selected)
                             button._on_enter()
                             button._on_leave()
                             self.assertEqual(button._text_label.cget("background"), background)

@@ -14,13 +14,14 @@ if not all((FFMPEG / name).is_file() for name in (
                        'Use tools/release.py build --ffmpeg-bundle <audio ZIP> to prepare them.')
 
 datas = [(str(ROOT / 'config.example.yaml'), '.'),
-         (str(ROOT / 'assets' / 'echosign.ico'), 'assets'),
+         (str(ROOT / 'assets' / 'hdusign.ico'), 'assets'),
+         (str(ROOT / 'hdusign' / 'qml'), 'hdusign/qml'),
          (str(BROWSERS), 'browsers'),
          (str(FFMPEG), 'ffmpeg')]
 binaries = []
 hiddenimports = ['soundcard.mediafoundation']
 for package in ('sherpa_onnx', 'soundcard', 'fastembed', 'onnxruntime',
-                'tokenizers', 'huggingface_hub', 'customtkinter'):
+                'tokenizers', 'huggingface_hub'):
     package_data, package_binaries, package_imports = collect_all(package)
     datas += package_data
     binaries += package_binaries
@@ -28,15 +29,16 @@ for package in ('sherpa_onnx', 'soundcard', 'fastembed', 'onnxruntime',
 
 
 a = Analysis(
-    [str(ROOT / 'echosign' / '__main__.py')],
+    [str(ROOT / 'hdusign' / '__main__.py')],
     pathex=[str(ROOT)],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    hookspath=[],
+    hookspath=[str(ROOT / 'tools' / 'hooks')],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['tkinter', 'customtkinter', 'hdusign.gui', 'hdusign.ui',
+              'PyQt5', 'PyQt6', 'PySide2'],
     noarchive=False,
     optimize=0,
 )
@@ -47,8 +49,8 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='EchoSign',
-    icon=str(ROOT / 'assets' / 'echosign.ico'),
+    name='HDUSign',
+    icon=str(ROOT / 'assets' / 'hdusign.ico'),
     version=str(ROOT / 'build' / 'windows-version.txt'),
     debug=False,
     bootloader_ignore_signals=False,
@@ -68,5 +70,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=['ffmpeg.exe'],
-    name='EchoSign',
+    name='HDUSign',
 )

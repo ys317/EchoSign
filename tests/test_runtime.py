@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from echosign import runtime
+from hdusign import runtime
 
 
 class RuntimeTests(unittest.TestCase):

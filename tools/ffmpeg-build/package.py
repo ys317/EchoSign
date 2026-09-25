@@ -17,7 +17,7 @@ from verify import build_path
 ROOT = Path(__file__).resolve().parent
 REPOSITORY = ROOT.parent.parent
 EPOCH = 1781664539
-STEM = "ffmpeg-8.1.2-echosign-audio"
+STEM = "ffmpeg-8.1.2-hdusign-audio"
 RECIPE_FILES = ("README.md", "source-lock.json", "fetch_sources.py", "build.sh", "verify.py", "package.py")
 
 
@@ -75,8 +75,8 @@ def main() -> None:
     shutil.copytree(record / "toolchain-licenses", package / "licenses/toolchain", dirs_exist_ok=True)
     lock = json.loads((ROOT / "source-lock.json").read_text())
     metadata = {
-        "component": "FFmpeg", "version": lock["version"] + "-echosign-audio",
-        "build_name": "echosign-audio", "license": "LGPL-2.1-or-later",
+        "component": "FFmpeg", "version": lock["version"] + "-hdusign-audio",
+        "build_name": "hdusign-audio", "license": "LGPL-2.1-or-later",
         "tls_backend": "schannel", "tls_verify_required": True, "ca_store": "Windows",
         "binary_sha256": sha256(executable),
         "source_archive": {"name": archive.name, "sha256": sha256(archive)},
@@ -86,7 +86,7 @@ def main() -> None:
     }
     (package / "SOURCE.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     (package / "README.txt").write_text(
-        "EchoSign portable audio FFmpeg 8.1.2\n"
+        "HDUSign portable audio FFmpeg 8.1.2\n"
         "Built from the official FFmpeg source with internal audio codecs and Windows Schannel.\n"
         "No external codec libraries, OpenSSL, GPL or nonfree FFmpeg options are enabled.\n"
         "Use -tls_verify 1 for HTTPS. Trust comes from the Windows certificate store.\n"
